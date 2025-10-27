@@ -9,7 +9,7 @@ from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics.pairwise import cosine_similarity
 import joblib
 
-print("🤖 Starting full machine learning behavioral analysis...\n")
+print("Starting full machine learning behavioral analysis...\n")
 start_time = time.time()
 
 # === Paths ===
