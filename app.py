@@ -2,7 +2,7 @@
 from flask import Flask
 from flask_cors import CORS
 from db import db
-from urls import register_routes   # <-- Import here
+from urls import register_routes  
 
 app = Flask(__name__)
 CORS(app)  # allow frontend access
