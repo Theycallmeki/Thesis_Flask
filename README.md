@@ -1,9 +1,17 @@
-🛒 Behavioral Analysis & Recommendation System
 Project Overview
 
-This project implements a machine learning pipeline to analyze customer purchase behavior and provide item recommendations. The workflow covers data preprocessing, user behavior modeling, machine learning training, and recommendation generation.
+This project implements a machine learning pipeline to analyze customer purchase behavior and provide item recommendations.
+It covers:
 
-The system uses raw sales data (raw_sales.csv) and outputs:
+Data preprocessing
+
+User behavior modeling
+
+Machine learning training
+
+Item recommendation generation
+
+The system uses raw_sales.csv as input and outputs:
 
 Categorized sales dataset (trained_sales.csv)
 
@@ -15,17 +23,17 @@ User behavior summary and top-selling items (behavior_analysis_ml.csv)
 
 1. Data Preparation
 
-Loaded raw_sales.csv.
+Loads raw_sales.csv.
 
-Automatically categorized items into predefined categories (Fruits, Vegetables, Meat, Dairy, etc.) using keyword matching.
+Automatically categorizes items into predefined categories (Fruits, Vegetables, Meat, Dairy, etc.) using keyword matching.
 
-Filled uncategorized items as 'Uncategorized'.
+Fills uncategorized items as 'Uncategorized'.
 
-Saved cleaned dataset as trained_sales.csv.
+Saves the cleaned dataset as trained_sales.csv.
 
 2. User Behavior Analysis
 
-Computed per-user metrics:
+Computes per-user metrics:
 
 Total purchases (count)
 
@@ -33,40 +41,44 @@ Days active (days_active)
 
 Average purchases per week (avg_per_week)
 
-Classified users into frequency categories:
+Classifies users into frequency categories:
 
 Occasional, Monthly, Weekly, Daily
 
-Saved behavior summary to behavior_analysis_ml.csv.
+Saves user behavior summary to behavior_analysis_ml.csv.
 
 3. Machine Learning Model
 
-Trained a RandomForestClassifier to predict user purchase frequency based on behavioral features.
+Trains a RandomForestClassifier to predict user purchase frequency based on behavioral features.
 
-Model evaluation:
+Evaluates the model:
 
 Accuracy: 100%
 
-Classification report generated
+Generates a classification report
 
-Saved model (buying_frequency_model.pkl) and label encoder (label_encoder.pkl) for later use.
+Saves trained model and label encoder for future use:
+
+buying_frequency_model.pkl
+
+label_encoder.pkl
 
 4. Recommendation System
 
-Built a user-item matrix.
+Builds a user-item matrix.
 
-Calculated item similarity using cosine similarity.
+Computes item similarity using cosine similarity.
 
-Generated top 5 similar item recommendations for a sample item.
+Generates top 5 similar item recommendations for a sample item.
 
-Sample output:
+Example Output:
 
 Sample item: 'canned beer'
 Recommendations: ['whole milk', 'other vegetables', 'rolls/buns', 'root vegetables', 'soda']
 
 5. Top-selling Items
 
-Listed the 10 most frequently purchased items:
+The 10 most frequently purchased items are:
 
 whole milk
 other vegetables
@@ -89,11 +101,11 @@ Next Steps / Recommendations
 
 Improve recommendations by considering item categories for more realistic suggestions.
 
-Add an interactive recommendation function, allowing users to input any item and get suggestions without rerunning the script.
+Add an interactive recommendation function for dynamic item queries.
 
-Evaluate and test the ML model on larger datasets to avoid overfitting (100% accuracy may indicate memorization).
+Test and validate the ML model on larger datasets to prevent overfitting.
 
-Optional: Deploy as a Flask API to make predictions and recommendations accessible via a web interface.
+Optionally deploy as a Flask API for web-based predictions and recommendations.
 
 How to Run
 
@@ -104,4 +116,4 @@ Run the script:
 python -m ml.analyze_behavior
 
 
-Check outputs in the ml/ folder.
+Outputs will be saved automatically in the ml/ folder.
