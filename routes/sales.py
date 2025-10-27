@@ -7,7 +7,7 @@ from datetime import date
 sales_bp = Blueprint('sales', __name__)
 
 # ✅ GET all sales
-@sales_bp.route('/sales', methods=['GET'])
+@sales_bp.route('/', methods=['GET'])
 def get_all_sales():
     sales = SalesHistory.query.all()
     result = []
@@ -23,7 +23,7 @@ def get_all_sales():
 
 
 # ✅ GET sale by ID
-@sales_bp.route('/sales/<int:id>', methods=['GET'])
+@sales_bp.route('/<int:id>', methods=['GET'])
 def get_sale_by_id(id):
     sale = SalesHistory.query.get(id)
     if not sale:
@@ -39,7 +39,7 @@ def get_sale_by_id(id):
 
 
 # ✅ CREATE new sale
-@sales_bp.route('/sales', methods=['POST'])
+@sales_bp.route('/', methods=['POST'])
 def create_sale():
     data = request.get_json()
     item_id = data.get('item_id')
@@ -74,7 +74,7 @@ def create_sale():
 
 
 # ✅ UPDATE sale record
-@sales_bp.route('/sales/<int:id>', methods=['PUT'])
+@sales_bp.route('/<int:id>', methods=['PUT'])
 def update_sale(id):
     sale = SalesHistory.query.get(id)
     if not sale:
@@ -93,7 +93,7 @@ def update_sale(id):
 
 
 # ✅ DELETE sale record
-@sales_bp.route('/sales/<int:id>', methods=['DELETE'])
+@sales_bp.route('/<int:id>', methods=['DELETE'])
 def delete_sale(id):
     sale = SalesHistory.query.get(id)
     if not sale:
