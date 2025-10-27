@@ -17,7 +17,7 @@ class Item(db.Model):
         'Bakery',
         'Frozen',
         'Canned Goods',
-        'Condiments',
+        'Condiments',   
         'Dry Goods',
         'Grains & Pasta',
         'Spices & Seasonings',
