@@ -4,9 +4,6 @@ import torch
 from sentence_transformers import SentenceTransformer, util
 from tqdm import tqdm
 
-# ================================
-# 1. DEVICE CHECK (GPU OR CPU)
-# ================================
 if torch.cuda.is_available():
     DEVICE = "cuda"
     print("🔥 GPU detected:", torch.cuda.get_device_name(0))
@@ -14,15 +11,11 @@ else:
     DEVICE = "cpu"
     print("⚠️ No GPU detected — using CPU")
 
-# ================================
-# 2. LOAD CSV
-# ================================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 RAW_PATH = os.path.join(BASE_DIR, "raw_sales.csv")
 
 df = pd.read_csv(RAW_PATH)
 
-# Detect correct item column
 def get_item_column(df):
     for col in ["item", "itemDescription", "ItemDescription", "Item"]:
         if col in df.columns:
@@ -32,9 +25,6 @@ def get_item_column(df):
 item_col = get_item_column(df)
 print("✅ Using item column:", item_col)
 
-# ================================
-# 3. CATEGORY LIST
-# ================================
 CATEGORIES = [
     'Fruits', 'Vegetables', 'Meat', 'Seafood', 'Dairy', 'Beverages',
     'Snacks', 'Bakery', 'Frozen', 'Canned Goods', 'Condiments',
@@ -44,53 +34,37 @@ CATEGORIES = [
     'Cleaning Supplies'
 ]
 
-# ================================
-# 4. LOAD EMBEDDING MODEL (22MB)
-# ================================
 print("⏳ Loading 22MB embedding model... (MiniLM-L6-v2)")
-
 model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')
 model = model.to(DEVICE)
-
 print("✅ Model loaded!")
 
-# ================================
-# 5. ENCODE CATEGORIES (ONCE)
-# ================================
 print("⏳ Encoding category labels...")
-
 category_embeddings = model.encode(
     CATEGORIES, convert_to_tensor=True, device=DEVICE
 )
 
-# ================================
-# 6. PROCESS ALL ITEMS
-# ================================
 items = df[item_col].fillna("").astype(str).tolist()
 item_categories = []
 
 print("⏳ Classifying products using embedding similarity...")
 
-BATCH_SIZE = 512  # Large batch = SUPER FAST on GPU
+BATCH_SIZE = 512
 
 for i in tqdm(range(0, len(items), BATCH_SIZE)):
     batch = items[i:i + BATCH_SIZE]
 
-    # Encode a batch of item descriptions
     item_emb = model.encode(
         batch, convert_to_tensor=True, device=DEVICE
     )
 
-    # Compute cosine similarity between item ↔ category
     scores = util.cos_sim(item_emb, category_embeddings)
 
-    # Best category index per item
     best_indices = torch.argmax(scores, dim=1).tolist()
 
     for idx in best_indices:
         item_categories.append(CATEGORIES[idx])
 
-# Save the results
 df["category"] = item_categories
 
 OUTPUT_PATH = os.path.join(BASE_DIR, "sales_with_categories_fast.csv")
