@@ -1,13 +1,11 @@
-# app.py
 from flask import Flask
 from flask_cors import CORS
 from db import db
 from urls import register_routes  
 
 app = Flask(__name__)
-CORS(app)  # allow frontend access
+CORS(app, resources={r"/*": {"origins": "http://localhost:3000"}})
 
-# Database config
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///thesis.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
@@ -17,7 +15,7 @@ register_routes(app)
 
 @app.route('/')
 def index():
-    return {'message': 'Flask API running successfully 🎉'}
+    return {'message': 'Flask API running successfully'}
 
 if __name__ == '__main__':
     with app.app_context():
