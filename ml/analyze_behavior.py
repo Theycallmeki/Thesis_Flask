@@ -1,3 +1,4 @@
+import os
 import pandas as pd
 import numpy as np
 import torch
@@ -5,7 +6,11 @@ import torch.nn as nn
 from sklearn.preprocessing import MinMaxScaler, LabelEncoder
 from torch.utils.data import Dataset, DataLoader
 
-df = pd.read_csv("sales_with_categories_fast.csv")
+# === FIXED CSV PATH (works in Flask + works manually) ===
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+CSV_PATH = os.path.join(BASE_DIR, "sales_with_categories_fast.csv")
+
+df = pd.read_csv(CSV_PATH)
 df["Date"] = pd.to_datetime(df["Date"], dayfirst=True)
 
 daily = (
