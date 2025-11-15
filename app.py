@@ -22,18 +22,12 @@ if __name__ == '__main__':
     with app.app_context():
         db.create_all()
 
-    # ---------------------------------------------------
-    # FIX: Run ml/analyze_behavior.py with correct folder
-    # ---------------------------------------------------
-    BASE_DIR = os.getcwd()                     # C:\Users\acer\Downloads\Thesis_Flask-1
-    ML_FOLDER = os.path.join(BASE_DIR, "ml")   # C:\Users\acer\Downloads\Thesis_Flask-1\ml
+    BASE_DIR = os.getcwd()
+    ML_FOLDER = os.path.join(BASE_DIR, "ml")
     ML_SCRIPT = os.path.join(ML_FOLDER, "analyze_behavior.py")
 
     print("Running ML script:", ML_SCRIPT)
 
-    # Run script as: python ml/analyze_behavior.py
     subprocess.Popen(["python", ML_SCRIPT])
-
-    # ---------------------------------------------------
 
     app.run(debug=True, host='0.0.0.0', port=5000)
