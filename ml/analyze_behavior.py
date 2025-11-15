@@ -1,9 +1,3 @@
-# ============================================================
-#  TIME SERIES MODEL + USER NEXT PURCHASE MODEL
-#  Dataset: sales_with_categories_fast.csv (Store A)
-#  Store B not yet available → pretrain only on Store A
-# ============================================================
-
 import pandas as pd
 import numpy as np
 import torch
@@ -11,15 +5,8 @@ import torch.nn as nn
 from sklearn.preprocessing import MinMaxScaler, LabelEncoder
 from torch.utils.data import Dataset, DataLoader
 
-# ============================================================
-# LOAD DATA
-# ============================================================
 df = pd.read_csv("sales_with_categories_fast.csv")
 df["Date"] = pd.to_datetime(df["Date"], dayfirst=True)
-
-# ============================================================
-# PART 1 — STORE-LEVEL TIME SERIES FORECASTING
-# ============================================================
 
 daily = (
     df.groupby(["Date", "category"])
@@ -82,12 +69,10 @@ for epoch in range(EPOCHS):
         loss.backward()
         optimizer.step()
         total_loss += loss.item()
-
     print(f"Epoch {epoch+1}/{EPOCHS} Loss: {total_loss:.4f}")
 
 print("\nTime Series Training complete.\n")
 
-# Predict next day
 with torch.no_grad():
     last_seq = torch.tensor(scaled_values[-SEQ_LEN:], dtype=torch.float32).unsqueeze(0)
     next_day_scaled = model_ts(last_seq).numpy()[0]
@@ -102,15 +87,10 @@ future_df = pd.DataFrame({
 print("\nPredicted demand for the next day:")
 print(future_df)
 
-# ============================================================
-# PART 2 — USER NEXT-PURCHASE PREDICTION
-# ============================================================
-
 print("\n===============================================")
 print(" TRAINING USER NEXT-PURCHASE MODEL")
 print("===============================================\n")
 
-# Prepare sequences for users
 df = df.sort_values(["Member_number", "Date"])
 
 le = LabelEncoder()
@@ -168,14 +148,9 @@ for epoch in range(EPOCHS):
         loss.backward()
         optimizer2.step()
         total_loss += loss.item()
-
     print(f"User Model Epoch {epoch+1}/{EPOCHS} Loss: {total_loss:.4f}")
 
 print("\nUser-Level next-purchase model training complete!\n")
-
-# ============================================================
-# PREDICT NEXT CATEGORY FOR ALL USERS
-# ============================================================
 
 all_user_predictions = []
 
@@ -198,19 +173,11 @@ for user_id, history in user_sequences.items():
         "probability": float(top_prob.item())
     })
 
-# ============================================================
-# SORT USERS BY STRONGEST PREDICTION (TOP 10 USERS)
-# ============================================================
-
 sorted_users = sorted(
     all_user_predictions,
     key=lambda x: x["probability"],
     reverse=True
 )
-
-# ============================================================
-# PRINT ONLY TOP 10 USERS
-# ============================================================
 
 print("\n==================== TOP 10 USERS (NEXT CATEGORY PREDICTION) ====================\n")
 
