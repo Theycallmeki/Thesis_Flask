@@ -186,7 +186,7 @@ sorted_users = sorted(
 
 print("\n==================== TOP 10 USERS (NEXT CATEGORY PREDICTION) ====================\n")
 
-for entry in sorted_users[:100]:
+for entry in sorted_users[:1000]:
     print(
         f"User {entry['user']} | "
         f"Next Category: {entry['predicted_category']} | "
