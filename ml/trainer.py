@@ -1,62 +1,100 @@
 import os
 import pandas as pd
+import torch
+from sentence_transformers import SentenceTransformer, util
+from tqdm import tqdm
 
-# ✅ Automatically find the correct folder (ml)
+# ================================
+# 1. DEVICE CHECK (GPU OR CPU)
+# ================================
+if torch.cuda.is_available():
+    DEVICE = "cuda"
+    print("🔥 GPU detected:", torch.cuda.get_device_name(0))
+else:
+    DEVICE = "cpu"
+    print("⚠️ No GPU detected — using CPU")
+
+# ================================
+# 2. LOAD CSV
+# ================================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 RAW_PATH = os.path.join(BASE_DIR, "raw_sales.csv")
 
-# === Load dataset ===
 df = pd.read_csv(RAW_PATH)
 
-# === Define your categories ===
-categories = {
-    'Fruits': ['fruit', 'citrus', 'apple', 'banana', 'mango', 'pip fruit', 'tropical'],
-    'Vegetables': ['vegetable', 'root', 'spinach', 'tomato', 'broccoli'],
-    'Meat': ['beef', 'chicken', 'pork', 'sausage', 'ham', 'frankfurter'],
-    'Seafood': ['fish', 'shrimp', 'tuna', 'salmon'],
-    'Dairy': ['milk', 'yogurt', 'butter', 'cheese', 'cream', 'butter milk'],
-    'Beverages': ['soda', 'juice', 'coffee', 'tea', 'water'],
-    'Snacks': ['snack', 'chips', 'crisps', 'nuts', 'chocolate', 'specialty bar'],
-    'Bakery': ['bread', 'pastry', 'cake', 'buns', 'rolls'],
-    'Frozen': ['frozen', 'ice cream'],
-    'Canned Goods': ['canned', 'tin', 'soup'],
-    'Condiments': ['ketchup', 'mustard', 'mayo', 'sauce'],
-    'Dry Goods': ['flour', 'sugar', 'salt'],
-    'Grains & Pasta': ['rice', 'pasta', 'noodles', 'spaghetti'],
-    'Spices & Seasonings': ['pepper', 'herbs', 'spice'],
-    'Breakfast & Cereal': ['cereal', 'oats', 'granola'],
-    'Personal Care': ['soap', 'shampoo', 'toothpaste'],
-    'Household': ['detergent', 'tissue', 'cleaner'],
-    'Baby Products': ['diaper', 'baby'],
-    'Pet Supplies': ['dog', 'cat', 'pet'],
-    'Health & Wellness': ['vitamin', 'supplement', 'medicine'],
-    'Cleaning Supplies': ['bleach', 'cleaner', 'disinfectant']
-}
-
-# === Helper: auto-detect correct column ===
+# Detect correct item column
 def get_item_column(df):
-    for possible_col in ['item', 'itemDescription', 'Item', 'ItemDescription']:
-        if possible_col in df.columns:
-            return possible_col
-    raise KeyError("No valid item column found (expected 'item' or 'itemDescription')")
+    for col in ["item", "itemDescription", "ItemDescription", "Item"]:
+        if col in df.columns:
+            return col
+    raise KeyError("❌ No item description column found.")
 
 item_col = get_item_column(df)
+print("✅ Using item column:", item_col)
 
-# === Match each item to a category ===
-def match_category(item):
-    if pd.isna(item):
-        return None
-    item_lower = str(item).lower()
-    for category, keywords in categories.items():
-        if any(word in item_lower for word in keywords):
-            return category
-    return None
+# ================================
+# 3. CATEGORY LIST
+# ================================
+CATEGORIES = [
+    'Fruits', 'Vegetables', 'Meat', 'Seafood', 'Dairy', 'Beverages',
+    'Snacks', 'Bakery', 'Frozen', 'Canned Goods', 'Condiments',
+    'Dry Goods', 'Grains & Pasta', 'Spices & Seasonings',
+    'Breakfast & Cereal', 'Personal Care', 'Household',
+    'Baby Products', 'Pet Supplies', 'Health & Wellness',
+    'Cleaning Supplies'
+]
 
-df['category'] = df[item_col].apply(match_category)
-df['category'] = df['category'].fillna('Uncategorized')
+# ================================
+# 4. LOAD EMBEDDING MODEL (22MB)
+# ================================
+print("⏳ Loading 22MB embedding model... (MiniLM-L6-v2)")
 
-# === Save the trained file inside /ml folder ===
-TRAINED_PATH = os.path.join(BASE_DIR, "trained_sales.csv")
-df.to_csv(TRAINED_PATH, index=False)
+model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')
+model = model.to(DEVICE)
 
-print(f"✅ Training complete! File saved at: {TRAINED_PATH}")
+print("✅ Model loaded!")
+
+# ================================
+# 5. ENCODE CATEGORIES (ONCE)
+# ================================
+print("⏳ Encoding category labels...")
+
+category_embeddings = model.encode(
+    CATEGORIES, convert_to_tensor=True, device=DEVICE
+)
+
+# ================================
+# 6. PROCESS ALL ITEMS
+# ================================
+items = df[item_col].fillna("").astype(str).tolist()
+item_categories = []
+
+print("⏳ Classifying products using embedding similarity...")
+
+BATCH_SIZE = 512  # Large batch = SUPER FAST on GPU
+
+for i in tqdm(range(0, len(items), BATCH_SIZE)):
+    batch = items[i:i + BATCH_SIZE]
+
+    # Encode a batch of item descriptions
+    item_emb = model.encode(
+        batch, convert_to_tensor=True, device=DEVICE
+    )
+
+    # Compute cosine similarity between item ↔ category
+    scores = util.cos_sim(item_emb, category_embeddings)
+
+    # Best category index per item
+    best_indices = torch.argmax(scores, dim=1).tolist()
+
+    for idx in best_indices:
+        item_categories.append(CATEGORIES[idx])
+
+# Save the results
+df["category"] = item_categories
+
+OUTPUT_PATH = os.path.join(BASE_DIR, "sales_with_categories_fast.csv")
+df.to_csv(OUTPUT_PATH, index=False)
+
+print("🎉 DONE! Fast file saved to:", OUTPUT_PATH)
+print("⚡ Processed ALL rows in minutes!")
