@@ -6,7 +6,7 @@ import torch.nn as nn
 from sklearn.preprocessing import MinMaxScaler, LabelEncoder
 from torch.utils.data import Dataset, DataLoader
 
-# === FIXED CSV PATH (works in Flask + works manually) ===
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CSV_PATH = os.path.join(BASE_DIR, "sales_with_categories_fast.csv")
 
