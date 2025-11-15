@@ -1,12 +1,25 @@
+# ============================================================
+#  TIME SERIES MODEL + USER NEXT PURCHASE MODEL
+#  Dataset: sales_with_categories_fast.csv (Store A)
+#  Store B not yet available → pretrain only on Store A
+# ============================================================
+
 import pandas as pd
 import numpy as np
 import torch
 import torch.nn as nn
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import MinMaxScaler, LabelEncoder
 from torch.utils.data import Dataset, DataLoader
 
+# ============================================================
+# LOAD DATA
+# ============================================================
 df = pd.read_csv("sales_with_categories_fast.csv")
 df["Date"] = pd.to_datetime(df["Date"], dayfirst=True)
+
+# ============================================================
+# PART 1 — STORE-LEVEL TIME SERIES FORECASTING
+# ============================================================
 
 daily = (
     df.groupby(["Date", "category"])
@@ -25,15 +38,11 @@ SEQ_LEN = 30
 
 class TimeSeriesDataset(Dataset):
     def __init__(self, data, seq_len=SEQ_LEN):
-        self.data = data
-        self.seq_len = seq_len
         self.X = []
         self.y = []
         for i in range(len(data) - seq_len):
-            seq_x = data[i:i+seq_len]
-            seq_y = data[i+seq_len]
-            self.X.append(seq_x)
-            self.y.append(seq_y)
+            self.X.append(data[i:i+seq_len])
+            self.y.append(data[i+seq_len])
 
     def __len__(self):
         return len(self.X)
@@ -50,45 +59,38 @@ num_categories = daily.shape[1]
 class LSTMForecaster(nn.Module):
     def __init__(self, num_features, hidden_size=64, num_layers=2):
         super().__init__()
-        self.lstm = nn.LSTM(
-            input_size=num_features,
-            hidden_size=hidden_size,
-            num_layers=num_layers,
-            batch_first=True
-        )
+        self.lstm = nn.LSTM(num_features, hidden_size, num_layers, batch_first=True)
         self.fc = nn.Linear(hidden_size, num_features)
 
     def forward(self, x):
         out, _ = self.lstm(x)
-        out = self.fc(out[:, -1, :])
-        return out
+        return self.fc(out[:, -1, :])
 
-model = LSTMForecaster(num_features=num_categories)
-
+model_ts = LSTMForecaster(num_categories)
 criterion = nn.MSELoss()
-optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+optimizer = torch.optim.Adam(model_ts.parameters(), lr=0.001)
 
-EPOCHS = 20
+print("\nTraining Store-Level Time Series Model...\n")
 
-print("\nTraining model on Store A data...\n")
-
+EPOCHS = 10
 for epoch in range(EPOCHS):
     total_loss = 0
     for xb, yb in loader:
         optimizer.zero_grad()
-        pred = model(xb)
+        pred = model_ts(xb)
         loss = criterion(pred, yb)
         loss.backward()
         optimizer.step()
         total_loss += loss.item()
 
-    print(f"Epoch {epoch+1}/{EPOCHS}  Loss: {total_loss:.4f}")
+    print(f"Epoch {epoch+1}/{EPOCHS} Loss: {total_loss:.4f}")
 
-print("\nTraining complete.\n")
+print("\nTime Series Training complete.\n")
 
+# Predict next day
 with torch.no_grad():
     last_seq = torch.tensor(scaled_values[-SEQ_LEN:], dtype=torch.float32).unsqueeze(0)
-    next_day_scaled = model(last_seq).numpy()[0]
+    next_day_scaled = model_ts(last_seq).numpy()[0]
 
 next_day = scaler.inverse_transform(next_day_scaled.reshape(1, -1))[0]
 
@@ -97,5 +99,124 @@ future_df = pd.DataFrame({
     "predicted_sales": next_day
 }).sort_values("predicted_sales", ascending=False)
 
-print("Predicted demand for tomorrow:")
+print("\nPredicted demand for the next day:")
 print(future_df)
+
+# ============================================================
+# PART 2 — USER NEXT-PURCHASE PREDICTION
+# ============================================================
+
+print("\n===============================================")
+print(" TRAINING USER NEXT-PURCHASE MODEL")
+print("===============================================\n")
+
+# Prepare sequences for users
+df = df.sort_values(["Member_number", "Date"])
+
+le = LabelEncoder()
+df["cat_id"] = le.fit_transform(df["category"])
+
+user_sequences = {}
+for user, group in df.groupby("Member_number"):
+    user_sequences[user] = group["cat_id"].tolist()
+
+class UserSeqDataset(Dataset):
+    def __init__(self, sequences, seq_len=10):
+        self.samples = []
+        for seq in sequences.values():
+            if len(seq) < seq_len + 1:
+                continue
+            for i in range(len(seq) - seq_len):
+                self.samples.append((seq[i:i+seq_len], seq[i+seq_len]))
+
+    def __len__(self):
+        return len(self.samples)
+
+    def __getitem__(self, idx):
+        x, y = self.samples[idx]
+        return torch.tensor(x), torch.tensor(y)
+
+user_dataset = UserSeqDataset(user_sequences, seq_len=10)
+user_loader = DataLoader(user_dataset, batch_size=32, shuffle=True)
+
+num_categories = df["cat_id"].nunique()
+
+class NextCategoryModel(nn.Module):
+    def __init__(self, num_categories, embed_size=32, hidden_size=64):
+        super().__init__()
+        self.embed = nn.Embedding(num_categories, embed_size)
+        self.lstm = nn.LSTM(embed_size, hidden_size, batch_first=True)
+        self.fc = nn.Linear(hidden_size, num_categories)
+
+    def forward(self, x):
+        x = self.embed(x)
+        out, _ = self.lstm(x)
+        return self.fc(out[:, -1, :])
+
+model_user = NextCategoryModel(num_categories)
+
+criterion2 = nn.CrossEntropyLoss()
+optimizer2 = torch.optim.Adam(model_user.parameters(), lr=0.001)
+
+EPOCHS = 7
+for epoch in range(EPOCHS):
+    total_loss = 0
+    for xb, yb in user_loader:
+        optimizer2.zero_grad()
+        preds = model_user(xb)
+        loss = criterion2(preds, yb)
+        loss.backward()
+        optimizer2.step()
+        total_loss += loss.item()
+
+    print(f"User Model Epoch {epoch+1}/{EPOCHS} Loss: {total_loss:.4f}")
+
+print("\nUser-Level next-purchase model training complete!\n")
+
+# ============================================================
+# PREDICT NEXT CATEGORY FOR ALL USERS
+# ============================================================
+
+all_user_predictions = []
+
+for user_id, history in user_sequences.items():
+    if len(history) < 10:
+        continue
+
+    last_seq = torch.tensor(history[-10:]).unsqueeze(0)
+
+    with torch.no_grad():
+        out = model_user(last_seq)
+        probs = torch.softmax(out, dim=1)[0]
+
+    top_prob, top_idx = torch.max(probs, dim=0)
+    predicted_category = le.inverse_transform([top_idx.item()])[0]
+
+    all_user_predictions.append({
+        "user": user_id,
+        "predicted_category": predicted_category,
+        "probability": float(top_prob.item())
+    })
+
+# ============================================================
+# SORT USERS BY STRONGEST PREDICTION (TOP 10 USERS)
+# ============================================================
+
+sorted_users = sorted(
+    all_user_predictions,
+    key=lambda x: x["probability"],
+    reverse=True
+)
+
+# ============================================================
+# PRINT ONLY TOP 10 USERS
+# ============================================================
+
+print("\n==================== TOP 10 USERS (NEXT CATEGORY PREDICTION) ====================\n")
+
+for entry in sorted_users[:1000]:
+    print(
+        f"User {entry['user']} | "
+        f"Next Category: {entry['predicted_category']} | "
+        f"Confidence: {entry['probability']:.4f}"
+    )
