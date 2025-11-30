@@ -5,11 +5,14 @@ class SalesHistory(db.Model):
     __tablename__ = 'sales_history'
 
     id = db.Column(db.Integer, primary_key=True)
+
     item_id = db.Column(db.Integer, db.ForeignKey('items.id'), nullable=False)
+
+    # ✅ Linked back to Item explicitly
+    item = db.relationship("Item", back_populates="sales_history")
+
     date = db.Column(db.Date, default=date.today, nullable=False)
     quantity_sold = db.Column(db.Integer, nullable=False)
 
-    item = db.relationship('Item', back_populates='sales')
-
     def __repr__(self):
-        return f"<SalesHistory {self.id} - Item {self.item_id}>"
+        return f"<SalesHistory item_id={self.item_id} date={self.date} qty={self.quantity_sold}>"

@@ -1,37 +1,55 @@
+# app.py
 from flask import Flask
 from flask_cors import CORS
-from db import db
-from urls import register_routes  
+from dotenv import load_dotenv
 import subprocess
 import os
 
+from db import db
+from urls import register_routes
+
+# Load environment variables from .env
+load_dotenv()
+
 app = Flask(__name__)
+
+# Enable CORS for your React frontend
 CORS(app, resources={r"/*": {"origins": "http://localhost:3000"}})
 
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///thesis.db'
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+# ------------------------------
+# Database config (PostgreSQL)
+# ------------------------------
+app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv(
+    "DATABASE_URL",
+    "postgresql://postgres:12345678@localhost:5432/thesis"  # fallback if .env missing
+)
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
+# Initialize SQLAlchemy
 db.init_app(app)
+
+# Register all blueprints
 register_routes(app)
 
-@app.route('/')
+@app.route("/")
 def index():
-    return {'message': 'Flask API running successfully'}
+    return {"message": "Flask API running successfully"}
 
-if __name__ == '__main__':
+if __name__ == "__main__":
+    # Create tables if they don't exist yet
     with app.app_context():
         db.create_all()
 
     # ------------------------------
-    # TEMPORARILY DISABLED ML SCRIPT
+    # ML SCRIPT AUTO-START
     # ------------------------------
-    # BASE_DIR = os.getcwd()
-    # ML_FOLDER = os.path.join(BASE_DIR, "ml")
-    # ML_SCRIPT = os.path.join(ML_FOLDER, "analyze_behavior.py")
-    #
-    # print("Running ML script:", ML_SCRIPT)
-    #
-    # subprocess.Popen(["python", ML_SCRIPT])
+    BASE_DIR = os.getcwd()
+    ML_FOLDER = os.path.join(BASE_DIR, "ml")
+    ML_SCRIPT = os.path.join(ML_FOLDER, "analyze_behavior.py")
+
+    print("Running ML script:", ML_SCRIPT)
+    subprocess.Popen(["python", ML_SCRIPT])
     # ------------------------------
 
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    # Run Flask server
+    app.run(debug=True, host="0.0.0.0", port=5000)

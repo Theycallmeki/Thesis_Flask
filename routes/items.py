@@ -1,11 +1,11 @@
 from flask import Blueprint, request, jsonify
 from models.item import Item
+from models.sales_history import SalesHistory
 from db import db
 
-items_bp = Blueprint('items', __name__, url_prefix='/items')
+# ✅ No url_prefix here because it's added in register_routes(app)
+items_bp = Blueprint('items', __name__)
 
-
-# Helper: list of valid categories
 def valid_categories():
     return [choice for choice in Item.__table__.columns.category.type.enums]
 
@@ -24,7 +24,27 @@ def get_items():
                 'price': float(i.price),
                 'barcode': i.barcode
             } for i in items
-        ])
+        ]), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# 🟢 GET item by ID  ✅ ADDED
+@items_bp.route('/<int:id>', methods=['GET'])
+def get_item_by_id(id):
+    try:
+        item = Item.query.get(id)
+        if not item:
+            return jsonify({'error': 'Item not found'}), 404
+
+        return jsonify({
+            'id': item.id,
+            'name': item.name,
+            'quantity': item.quantity,
+            'category': item.category,
+            'price': float(item.price),
+            'barcode': item.barcode
+        }), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -36,6 +56,7 @@ def get_item_by_barcode(barcode):
         item = Item.query.filter_by(barcode=barcode).first()
         if not item:
             return jsonify({'error': 'Item not found'}), 404
+
         return jsonify({
             'id': item.id,
             'name': item.name,
@@ -43,7 +64,7 @@ def get_item_by_barcode(barcode):
             'category': item.category,
             'price': float(item.price),
             'barcode': item.barcode
-        })
+        }), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -51,22 +72,45 @@ def get_item_by_barcode(barcode):
 # 🟢 CREATE item
 @items_bp.route('/', methods=['POST'])
 def create_item():
-    data = request.get_json()
-    name = data.get('name')
-    quantity = data.get('quantity', 0)
-    category = data.get('category')
-    price = data.get('price', 0.00)
-    barcode = data.get('barcode')
-
     try:
-        # Validate category
+        data = request.get_json() or {}
+
+        name = data.get('name')
+        quantity = data.get('quantity', 0)
+        category = data.get('category')
+        price = data.get('price')
+        barcode = data.get('barcode')
+
+        # ✅ Validate required fields
+        if not name or not barcode or category is None or price is None:
+            return jsonify({'error': 'name, barcode, category, and price are required'}), 400
+
+        # ✅ Validate quantity and price
+        if quantity < 0:
+            return jsonify({'error': 'quantity must be 0 or greater'}), 400
+        if float(price) < 0:
+            return jsonify({'error': 'price must be 0 or greater'}), 400
+
+        # ✅ Validate category
         if category not in valid_categories():
             return jsonify({'error': f"Invalid category. Allowed: {', '.join(valid_categories())}"}), 400
 
-        # Create item
-        new_item = Item(name=name, quantity=quantity, category=category, price=price, barcode=barcode)
+        # ✅ Check barcode uniqueness
+        existing = Item.query.filter_by(barcode=barcode).first()
+        if existing:
+            return jsonify({'error': 'barcode already exists'}), 400
+
+        new_item = Item(
+            name=name,
+            quantity=quantity,
+            category=category,
+            price=price,
+            barcode=barcode
+        )
+
         db.session.add(new_item)
         db.session.commit()
+
         return jsonify({
             'id': new_item.id,
             'name': new_item.name,
@@ -84,27 +128,43 @@ def create_item():
 # 🟡 UPDATE item
 @items_bp.route('/<int:id>', methods=['PUT'])
 def update_item(id):
-    data = request.get_json()
     try:
+        data = request.get_json() or {}
+
         item = Item.query.get(id)
         if not item:
             return jsonify({'error': 'Item not found'}), 404
 
+        # Validate category if provided
         category = data.get('category')
         if category and category not in valid_categories():
             return jsonify({'error': f"Invalid category. Allowed: {', '.join(valid_categories())}"}), 400
 
-        # Update fields
-        item.name = data.get('name', item.name)
-        item.category = category or item.category
-        item.barcode = data.get('barcode', item.barcode)
+        # Validate quantity/price if provided
+        if 'quantity' in data and data['quantity'] < 0:
+            return jsonify({'error': 'quantity must be 0 or greater'}), 400
+        if 'price' in data and float(data['price']) < 0:
+            return jsonify({'error': 'price must be 0 or greater'}), 400
 
+        # Validate barcode uniqueness if changed
+        if 'barcode' in data and data['barcode'] != item.barcode:
+            existing = Item.query.filter_by(barcode=data['barcode']).first()
+            if existing:
+                return jsonify({'error': 'barcode already exists'}), 400
+            item.barcode = data['barcode']
+
+        # Update fields
+        if 'name' in data:
+            item.name = data['name']
+        if category:
+            item.category = category
         if 'price' in data:
             item.price = data['price']
         if 'quantity' in data:
             item.quantity = data['quantity']
 
         db.session.commit()
+
         return jsonify({
             'id': item.id,
             'name': item.name,
@@ -112,7 +172,8 @@ def update_item(id):
             'category': item.category,
             'price': float(item.price),
             'barcode': item.barcode
-        })
+        }), 200
+
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': str(e)}), 400
@@ -126,9 +187,16 @@ def delete_item(id):
         if not item:
             return jsonify({'error': 'Item not found'}), 404
 
+        # ✅ Block delete if sales history exists (audit safety)
+        has_sales = SalesHistory.query.filter_by(item_id=id).first()
+        if has_sales:
+            return jsonify({'error': 'Item has sales history and cannot be deleted'}), 400
+
         db.session.delete(item)
         db.session.commit()
-        return jsonify({'message': 'Item deleted'})
+
+        return jsonify({'message': 'Item deleted'}), 200
+
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': str(e)}), 400
