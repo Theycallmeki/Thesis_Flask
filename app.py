@@ -2,11 +2,13 @@
 from flask import Flask
 from flask_cors import CORS
 from dotenv import load_dotenv
-import subprocess
 import os
 
 from db import db
 from urls import register_routes
+
+# ✅ import the ML runner function (make sure ml/analyze_behavior.py defines run_ml())
+from ml.analyze_behavior import run_ml
 
 # Load environment variables from .env
 load_dotenv()
@@ -41,14 +43,13 @@ if __name__ == "__main__":
         db.create_all()
 
     # ------------------------------
-    # ML SCRIPT AUTO-START
+    # ✅ RUN ML INSIDE app.py (ONLY ONCE)
     # ------------------------------
-    BASE_DIR = os.getcwd()
-    ML_FOLDER = os.path.join(BASE_DIR, "ml")
-    ML_SCRIPT = os.path.join(ML_FOLDER, "analyze_behavior.py")
-
-    print("Running ML script:", ML_SCRIPT)
-    subprocess.Popen(["python", ML_SCRIPT])
+    # Flask debug mode runs the app twice because of the reloader.
+    # This guard ensures ML runs only in the "real" server process.
+    if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or not app.debug:
+        print("Running ML inside app.py ONCE...")
+        run_ml()
     # ------------------------------
 
     # Run Flask server
