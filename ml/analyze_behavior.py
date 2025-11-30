@@ -17,7 +17,7 @@ def run_ml():
     # LOAD + DAILY STORE SERIES
     # ===============================
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-    CSV_PATH = os.path.join(BASE_DIR, "100.csv")
+    CSV_PATH = os.path.join(BASE_DIR, "tester2.csv")
 
     df = pd.read_csv(CSV_PATH)
     df["Date"] = pd.to_datetime(df["Date"], dayfirst=True)
