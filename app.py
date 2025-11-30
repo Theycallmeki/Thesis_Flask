@@ -21,7 +21,7 @@ CORS(app, resources={r"/*": {"origins": "http://localhost:3000"}})
 # ------------------------------
 app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv(
     "DATABASE_URL",
-    "postgresql://postgres:12345678@localhost:5432/thesis"  # fallback if .env missing
+    "postgresql://postgres:12345678@localhost:5432/THESIS"  # fallback if .env missing
 )
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 

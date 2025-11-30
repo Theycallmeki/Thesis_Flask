@@ -6,7 +6,14 @@ class SalesHistory(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
 
-    item_id = db.Column(db.Integer, db.ForeignKey('items.id'), nullable=False)
+    # ✅ IMPORTANT FIX:
+    # DB column is "itemId" (camelCase), but we want to use item_id in Python.
+    item_id = db.Column(
+        "itemId",
+        db.Integer,
+        db.ForeignKey('items.id'),
+        nullable=False
+    )
 
     # ✅ Linked back to Item explicitly
     item = db.relationship("Item", back_populates="sales_history")
