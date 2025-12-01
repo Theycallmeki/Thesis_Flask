@@ -1,3 +1,4 @@
 from .item import Item
-from .sales_history import SalesHistory
 from .user import User
+from .sales_transaction import SalesTransaction
+from .sales_transaction_item import SalesTransactionItem

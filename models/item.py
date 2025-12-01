@@ -35,9 +35,9 @@ class Item(db.Model):
     price = db.Column(db.Numeric(10, 2), nullable=False, default=0.00)
     barcode = db.Column(db.String(255), unique=True, nullable=False)
 
-    # ✅ One Item -> many SalesHistory records
-    sales_history = db.relationship(
-        "SalesHistory",
+    # 🔄 Replaced: sales_history → transaction_items
+    transaction_items = db.relationship(
+        "SalesTransactionItem",
         back_populates="item",
         lazy=True,
         cascade="all, delete-orphan"
