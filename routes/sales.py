@@ -8,8 +8,9 @@ from models.item import Item
 
 sales_bp = Blueprint("sales", __name__)
 
-
+# --------------------------------------------------
 # 🔵 GET all transactions
+# --------------------------------------------------
 @sales_bp.route("/", methods=["GET"])
 def get_all_transactions():
     transactions = SalesTransaction.query.all()
@@ -33,7 +34,9 @@ def get_all_transactions():
     return jsonify(result), 200
 
 
+# --------------------------------------------------
 # 🔵 GET a single transaction by ID
+# --------------------------------------------------
 @sales_bp.route("/<int:id>", methods=["GET"])
 def get_transaction(id):
     t = SalesTransaction.query.get(id)
@@ -55,18 +58,17 @@ def get_transaction(id):
     }), 200
 
 
-# 🔵 CREATE new transaction (cart checkout)
+# --------------------------------------------------
+# 🔵 CREATE new transaction (POST /sales)
+# --------------------------------------------------
 @sales_bp.route("/", methods=["POST"])
 def create_transaction():
     data = request.get_json() or {}
-
-    cart_items = data.get("items", [])  
-    # format: [{ "item_id": 1, "quantity": 2 }, ...]
+    cart_items = data.get("items", [])
 
     if not cart_items:
         return jsonify({"error": "No items provided"}), 400
 
-    # Create transaction
     transaction = SalesTransaction()
     db.session.add(transaction)
 
@@ -75,7 +77,7 @@ def create_transaction():
         qty = entry.get("quantity")
 
         if not item_id or not qty:
-            return jsonify({"error": "item_id and quantity required for each cart item"}), 400
+            return jsonify({"error": "item_id and quantity required"}), 400
 
         item = Item.query.get(item_id)
         if not item:
@@ -84,17 +86,14 @@ def create_transaction():
         if item.quantity < qty:
             return jsonify({"error": f"Not enough stock for {item.name}"}), 400
 
-        # Reduce stock
         item.quantity -= qty
 
-        # Create transaction item entry
-        trans_item = SalesTransactionItem(
+        db.session.add(SalesTransactionItem(
             transaction=transaction,
             item=item,
             quantity=qty,
             price_at_sale=item.price
-        )
-        db.session.add(trans_item)
+        ))
 
     db.session.commit()
 
@@ -104,17 +103,71 @@ def create_transaction():
     }), 201
 
 
+# --------------------------------------------------
+# 🔵 UPDATE transaction (PUT /sales/<id>)
+# --------------------------------------------------
+@sales_bp.route("/<int:id>", methods=["PUT"])
+def update_transaction(id):
+    t = SalesTransaction.query.get(id)
+    if not t:
+        return jsonify({"error": "Transaction not found"}), 404
+
+    data = request.get_json() or {}
+    new_items = data.get("items", [])
+
+    if not new_items:
+        return jsonify({"error": "No items provided"}), 400
+
+    # 1️⃣ Restore old stock
+    for ti in t.items:
+        ti.item.quantity += ti.quantity
+
+    # 2️⃣ Remove old transaction items
+    SalesTransactionItem.query.filter_by(transaction_id=t.id).delete()
+
+    # 3️⃣ Add new items
+    for entry in new_items:
+        item_id = entry.get("item_id")
+        qty = entry.get("quantity")
+
+        if not item_id or not qty:
+            return jsonify({"error": "item_id and quantity required"}), 400
+
+        item = Item.query.get(item_id)
+        if not item:
+            return jsonify({"error": f"Item {item_id} not found"}), 400
+
+        if item.quantity < qty:
+            return jsonify({"error": f"Not enough stock for {item.name}"}), 400
+
+        item.quantity -= qty
+
+        db.session.add(SalesTransactionItem(
+            transaction=t,
+            item=item,
+            quantity=qty,
+            price_at_sale=item.price
+        ))
+
+    db.session.commit()
+
+    return jsonify({
+        "message": "Transaction updated",
+        "transaction_id": t.id
+    }), 200
+
+
+# --------------------------------------------------
 # 🔵 DELETE transaction (restore stock)
+# --------------------------------------------------
 @sales_bp.route("/<int:id>", methods=["DELETE"])
 def delete_transaction(id):
     t = SalesTransaction.query.get(id)
     if not t:
         return jsonify({"error": "Transaction not found"}), 404
 
-    # Restore stock for each item
     for ti in t.items:
-        item = ti.item
-        item.quantity += ti.quantity
+        ti.item.quantity += ti.quantity
 
     db.session.delete(t)
     db.session.commit()
