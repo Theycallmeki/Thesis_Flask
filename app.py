@@ -1,5 +1,5 @@
 # app.py
-# RUN ONLY TIME-SERIES FORECASTING
+# FINAL SAFE VERSION — ML RUNS ONCE, NO CIRCULAR IMPORTS
 
 from flask import Flask
 from flask_cors import CORS
@@ -9,13 +9,12 @@ import os
 from db import db
 from urls import register_routes
 
-# ✅ TIME-SERIES ONLY
+# ✅ Import ML function (SAFE: ML does NOT import app)
 from ml.time_series_forecast import run_time_series_forecast
 
 load_dotenv()
 
 app = Flask(__name__)
-
 CORS(app, resources={r"/*": {"origins": "http://localhost:3000"}})
 
 # ------------------------------
@@ -31,20 +30,34 @@ db.init_app(app)
 
 register_routes(app)
 
+
 @app.route("/")
 def index():
     return {"message": "Flask API running successfully"}
 
+
+# ------------------------------
+# APP ENTRY POINT
+# ------------------------------
 if __name__ == "__main__":
-    with app.app_context():
-        db.create_all()
 
-    # ------------------------------
-    # RUN TIME-SERIES ONCE
-    # ------------------------------
+    # 🔒 Prevent double-run in Flask debug reloader
     if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or not app.debug:
-        print("Running TIME-SERIES forecasting ONCE...")
-        run_time_series_forecast()
-    # ------------------------------
 
-    app.run(debug=False, host="0.0.0.0", port=5000)
+        with app.app_context():
+            db.create_all()
+
+            print("\n==============================")
+            print(" Running TIME-SERIES ANALYSIS ")
+            print("==============================\n")
+
+            run_time_series_forecast()
+
+            print("\n==============================")
+            print(" ML ANALYSIS FINISHED ")
+            print("==============================\n")
+
+    # ------------------------------
+    # RUN SERVER
+    # ------------------------------
+    app.run(debug=True, host="0.0.0.0", port=5000)

@@ -1,54 +1,85 @@
 # ml/time_series_forecast.py
-# STORE-LEVEL CATEGORY DEMAND FORECASTING (TIME-SERIES LSTM)
-# PRINTS TOP-5 RESULTS LIKE ORIGINAL CODE
+# TRUE TIME-SERIES PREDICTION WITH OUTLIER CONTROL
+# Uses LOG TRANSFORMATION (BEST PRACTICE)
 
-import os
 import pandas as pd
 import numpy as np
 import torch
 import torch.nn as nn
+
 from sklearn.preprocessing import MinMaxScaler
 from torch.utils.data import Dataset, DataLoader
 
+from db import db
+from models.sales_transaction import SalesTransaction
+from models.sales_transaction_item import SalesTransactionItem
+from models.item import Item
+
 
 def run_time_series_forecast():
-    # ===============================
-    # LOAD DATA
-    # ===============================
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-    CSV_PATH = os.path.join(BASE_DIR, "tester.csv")
-
-    df = pd.read_csv(CSV_PATH)
-    df["Date"] = pd.to_datetime(df["Date"], dayfirst=True)
+    print("\n[ML] Demand prediction started (log-scaled)")
 
     # ===============================
-    # BUILD DAILY CATEGORY SERIES
+    # 1️⃣ LOAD DATA (EXPLICIT JOIN)
     # ===============================
-    daily = (
-        df.groupby(["Date", "category"])
-          .size()
-          .unstack(fill_value=0)
-          .sort_index()
+    rows = (
+        db.session.query(
+            SalesTransaction.date.label("date"),
+            Item.category.label("category"),
+            SalesTransactionItem.quantity.label("quantity"),
+        )
+        .select_from(SalesTransaction)
+        .join(
+            SalesTransactionItem,
+            SalesTransaction.id == SalesTransactionItem.transaction_id
+        )
+        .join(
+            Item,
+            Item.id == SalesTransactionItem.item_id
+        )
+        .all()
     )
 
-    all_categories = sorted(df["category"].unique())
-    daily = daily.reindex(columns=all_categories, fill_value=0)
+    if not rows:
+        print("[ML] No sales data found")
+        return None
 
-    print("\nDaily series shape:", daily.shape)
+    df = pd.DataFrame(rows, columns=["date", "category", "quantity"])
+    df["date"] = pd.to_datetime(df["date"]).dt.date
 
     # ===============================
-    # SCALE DATA
+    # 2️⃣ DAILY CATEGORY SERIES
+    # ===============================
+    daily = (
+        df.groupby(["date", "category"])["quantity"]
+        .sum()
+        .unstack(fill_value=0)
+        .sort_index()
+    )
+
+    print(f"[ML] Days of data: {len(daily)}")
+    print(f"[ML] Categories: {daily.columns.tolist()}")
+
+    if len(daily) < 5:
+        print("[ML] Not enough data to train")
+        return None
+
+    # ===============================
+    # 3️⃣ 🔑 LOG TRANSFORMATION (KEY FIX)
+    # ===============================
+    # log1p handles zeros safely
+    log_daily = np.log1p(daily.values)
+
+    # ===============================
+    # 4️⃣ SCALE DATA
     # ===============================
     scaler = MinMaxScaler()
-    scaled = scaler.fit_transform(daily.values)
+    scaled = scaler.fit_transform(log_daily)
 
-    SEQ_LEN = 30
-    if len(scaled) <= SEQ_LEN:
-        SEQ_LEN = max(2, len(scaled) - 1)
-        print(f"[WARN] Using SEQ_LEN={SEQ_LEN}")
+    SEQ_LEN = min(30, len(scaled) - 1)
 
     # ===============================
-    # DATASET
+    # 5️⃣ DATASET
     # ===============================
     class TSDataset(Dataset):
         def __init__(self, data, seq_len):
@@ -70,32 +101,26 @@ def run_time_series_forecast():
     loader = DataLoader(dataset, batch_size=32, shuffle=True)
 
     # ===============================
-    # LSTM MODEL
+    # 6️⃣ MODEL
     # ===============================
-    class LSTMForecaster(nn.Module):
+    class LSTM(nn.Module):
         def __init__(self, features):
             super().__init__()
-            self.lstm = nn.LSTM(
-                features,
-                64,
-                num_layers=2,
-                batch_first=True,
-                dropout=0.2
-            )
+            self.lstm = nn.LSTM(features, 64, num_layers=2, batch_first=True)
             self.fc = nn.Linear(64, features)
 
         def forward(self, x):
             out, _ = self.lstm(x)
-            return self.fc(out[:, -1, :])
+            return self.fc(out[:, -1])
 
-    model = LSTMForecaster(daily.shape[1])
+    model = LSTM(daily.shape[1])
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
     loss_fn = nn.MSELoss()
 
     # ===============================
-    # TRAINING
+    # 7️⃣ TRAIN
     # ===============================
-    print("\nTraining time-series model...\n")
+    print("\n[ML] Training model...")
     for epoch in range(10):
         total_loss = 0.0
         for xb, yb in loader:
@@ -105,53 +130,67 @@ def run_time_series_forecast():
             optimizer.step()
             total_loss += loss.item()
 
-        print(f"[TS] Epoch {epoch+1}/10 Loss: {total_loss:.4f}")
+        print(f"Epoch {epoch + 1}/10 | Loss: {total_loss:.4f}")
 
     # ===============================
-    # FORECAST FUNCTION
+    # 8️⃣ PREDICTION FUNCTION
     # ===============================
-    def forecast(days):
+    def predict(days):
         model.eval()
+
         seq = torch.tensor(
             scaled[-SEQ_LEN:], dtype=torch.float32
         ).unsqueeze(0)
 
         preds = []
+
         for _ in range(days):
             with torch.no_grad():
-                p = model(seq).numpy()[0]
-            preds.append(p)
+                next_day = model(seq).numpy()[0]
+
+            preds.append(next_day)
+
             seq = torch.cat(
-                [seq[:, 1:, :], torch.tensor(p).view(1, 1, -1)],
+                [seq[:, 1:, :], torch.tensor(next_day).view(1, 1, -1)],
                 dim=1
             )
 
+        # 🔄 INVERSE SCALE
         preds = scaler.inverse_transform(np.array(preds))
+
+        # 🔄 INVERSE LOG TRANSFORM
+        preds = np.expm1(preds)
+
+        # Safety clamp
         return np.clip(preds, 0, None)
 
     # ===============================
-    # PRINT TOP-5 RESULTS (RESTORED)
+    # 9️⃣ MAKE PREDICTIONS
     # ===============================
-    def print_top5(preds, days, categories):
-        totals = preds.sum(axis=0)
-        top5_idx = np.argsort(totals)[::-1][:5]
+    pred_1 = predict(1)[0]
+    pred_7 = predict(7)
+    pred_30 = predict(30)
 
-        print(f"\n===== TOP 5 CATEGORIES (NEXT {days} DAYS) =====")
-        for rank, idx in enumerate(top5_idx, 1):
-            print(
-                f"{rank}. {categories[idx]} | "
-                f"Total: {totals[idx]:.2f} | "
-                f"Avg/day: {totals[idx]/days:.2f}"
-            )
+    print("\n===== PREDICTED TOMORROW =====")
+    for i, cat in enumerate(daily.columns):
+        print(f"{cat}: {int(round(pred_1[i]))} units")
 
-    forecast_7 = forecast(7)
-    forecast_30 = forecast(30)
+    print("\n===== PREDICTED NEXT 7 DAYS (TOTAL) =====")
+    for i, cat in enumerate(daily.columns):
+        print(f"{cat}: {int(round(pred_7[:, i].sum()))} units")
 
-    print_top5(forecast_7, 7, daily.columns)
-    print_top5(forecast_30, 30, daily.columns)
+    print("\n===== PREDICTED NEXT 30 DAYS (TOTAL) =====")
+    for i, cat in enumerate(daily.columns):
+        print(f"{cat}: {int(round(pred_30[:, i].sum()))} units")
 
     return {
-        "7_days": forecast_7,
-        "30_days": forecast_30,
-        "categories": daily.columns.tolist()
+        "tomorrow": dict(zip(daily.columns, pred_1.tolist())),
+        "next_7_days": {
+            cat: int(pred_7[:, i].sum())
+            for i, cat in enumerate(daily.columns)
+        },
+        "next_30_days": {
+            cat: int(pred_30[:, i].sum())
+            for i, cat in enumerate(daily.columns)
+        }
     }

@@ -24,6 +24,7 @@ def get_all_transactions():
                 {
                     "item_id": ti.item_id,
                     "item_name": ti.item.name,
+                    "category": ti.item.category,          # ✅ ADDED
                     "quantity": ti.quantity,
                     "price_at_sale": float(ti.price_at_sale)
                 }
@@ -50,6 +51,7 @@ def get_transaction(id):
             {
                 "item_id": ti.item_id,
                 "item_name": ti.item.name,
+                "category": ti.item.category,          # ✅ ADDED
                 "quantity": ti.quantity,
                 "price_at_sale": float(ti.price_at_sale)
             }
