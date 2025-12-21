@@ -1,3 +1,6 @@
+# This is the analyze_behavior.py version used for testing LSTM and GRU model for Activity 2
+# The file is intentionally commented
+
 # import os
 # import pandas as pd
 # import numpy as np
