@@ -1,4 +1,3 @@
-# routes/payment.py
 from flask import Blueprint, request, jsonify
 import requests
 from requests.auth import HTTPBasicAuth
@@ -21,6 +20,13 @@ def create_payment_intent():
     data = request.get_json()
     amount = data.get("amount", 2000)
     currency = data.get("currency", "PHP")
+    cart_items = data.get("cart", [])
+
+    # Store cart in metadata
+    cart_metadata = [
+        {"barcode": item["barcode"], "quantity": item["quantity"]}
+        for item in cart_items
+    ]
 
     url = "https://api.paymongo.com/v1/payment_intents"
     payload = {
@@ -30,7 +36,10 @@ def create_payment_intent():
                 "payment_method_allowed": ["gcash"],
                 "payment_method_options": {},
                 "currency": currency,
-                "capture_type": "automatic"
+                "capture_type": "automatic",
+                "metadata": {
+                    "cart": json.dumps(cart_metadata)
+                }
             }
         }
     }
@@ -60,17 +69,19 @@ def create_checkout_session():
     if not payment_intent_id:
         return jsonify({"error": "Missing payment_intent_id"}), 400
 
-    # Prepare line_items for PayMongo
+    # Prepare line_items for display (barcode is only in metadata)
     line_items = [
         {
             "name": item["name"],
-            "amount": int(round(item["price"] * 100)),  # convert to centavos
+            "amount": int(round(item["price"] * 100)),
             "currency": "PHP",
-            "quantity": max(1, item.get("quantity", 1)),
-            "barcode": item.get("barcode")  # include barcode for tracking
+            "quantity": max(1, item.get("quantity", 1))
         }
         for item in cart_items if item.get("price", 0) > 0
     ]
+
+    # Include full cart in metadata
+    cart_metadata = [{"barcode": item["barcode"], "quantity": item["quantity"]} for item in cart_items]
 
     url = "https://api.paymongo.com/v1/checkout_sessions"
     payload = {
@@ -83,7 +94,8 @@ def create_checkout_session():
                 "show_description": False,
                 "show_line_items": True,
                 "payment_method_types": ["gcash"],
-                "line_items": line_items
+                "line_items": line_items,
+                "metadata": {"cart": json.dumps(cart_metadata)}  # <-- important
             }
         }
     }
@@ -101,8 +113,7 @@ def create_checkout_session():
     if not checkout_url:
         return jsonify({"error": "Failed to get checkout URL", "raw": data}), 500
 
-    return jsonify({"checkoutUrl": checkout_url}), 200
-
+    return jsonify({"checkoutUrl": checkout_url, "sessionId": data.get("data", {}).get("id")}), 200
 
 
 # Webhook: handle successful payments
@@ -115,24 +126,28 @@ def paymongo_webhook():
     print(json.dumps(payload, indent=4))
     print("=== End Webhook ===")
 
-    event_type = payload.get("data", {}).get("attributes", {}).get("event", "")
+    event_type = payload.get("data", {}).get("attributes", {}).get("type", "")
 
     if event_type == "checkout_session.payment.paid":
         session_id = payload["data"]["id"]
-        print(f"✅ Payment successful for checkout session: {session_id}")
+        print(f"Payment successful for checkout session: {session_id}")
+
+        # Read cart directly from checkout session metadata
+        session_data = payload["data"]["attributes"].get("data", {}).get("attributes", {})
+        metadata = session_data.get("metadata", {})
+        cart_json = metadata.get("cart", "[]")
+        cart_items = json.loads(cart_json)
 
         # Update inventory quantities
-        line_items = payload["data"]["attributes"].get("line_items", [])
-        for item in line_items:
-            barcode = item.get("barcode")
+        for item in cart_items:
+            barcode = item["barcode"]
             quantity = item.get("quantity", 1)
-            if not barcode:
-                continue
-
             db_item = Item.query.filter_by(barcode=barcode).first()
             if db_item:
+                old_qty = db_item.quantity
                 db_item.quantity = max(0, db_item.quantity - quantity)
                 db.session.commit()
-                print(f"Updated {db_item.name} quantity to {db_item.quantity}")
+                print(f"Updated {db_item.name}: {old_qty} → {db_item.quantity}")
 
     return jsonify({"status": "success"}), 200
+
