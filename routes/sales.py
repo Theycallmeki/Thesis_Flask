@@ -1,109 +1,177 @@
 from flask import Blueprint, jsonify, request
-from models.sales_history import SalesHistory   # ✅ corrected import
-from models.item import Item
 from db import db
-from datetime import date
+from datetime import datetime
 
-sales_bp = Blueprint('sales', __name__)
+from models.sales_transaction import SalesTransaction
+from models.sales_transaction_item import SalesTransactionItem
+from models.item import Item
 
-# ✅ GET all sales
-@sales_bp.route('/', methods=['GET'])
-def get_all_sales():
-    sales = SalesHistory.query.all()
+sales_bp = Blueprint("sales", __name__)
+
+# --------------------------------------------------
+# 🔵 GET all transactions
+# --------------------------------------------------
+@sales_bp.route("/", methods=["GET"])
+def get_all_transactions():
+    transactions = SalesTransaction.query.all()
     result = []
-    for s in sales:
+
+    for t in transactions:
         result.append({
-            "id": s.id,
-            "item_id": s.item_id,
-            "item_name": s.item.name if s.item else None,
-            "date": s.date.isoformat(),
-            "quantity_sold": s.quantity_sold
+            "transaction_id": t.id,
+            "date": t.date.isoformat(),
+            "items": [
+                {
+                    "item_id": ti.item_id,
+                    "item_name": ti.item.name,
+                    "category": ti.item.category,          # ✅ ADDED
+                    "quantity": ti.quantity,
+                    "price_at_sale": float(ti.price_at_sale)
+                }
+                for ti in t.items
+            ]
         })
+
     return jsonify(result), 200
 
 
-# ✅ GET sale by ID
-@sales_bp.route('/<int:id>', methods=['GET'])
-def get_sale_by_id(id):
-    sale = SalesHistory.query.get(id)
-    if not sale:
-        return jsonify({"error": "Sale not found"}), 404
+# --------------------------------------------------
+# 🔵 GET a single transaction by ID
+# --------------------------------------------------
+@sales_bp.route("/<int:id>", methods=["GET"])
+def get_transaction(id):
+    t = SalesTransaction.query.get(id)
+    if not t:
+        return jsonify({"error": "Transaction not found"}), 404
 
     return jsonify({
-        "id": sale.id,
-        "item_id": sale.item_id,
-        "item_name": sale.item.name if sale.item else None,
-        "date": sale.date.isoformat(),
-        "quantity_sold": sale.quantity_sold
+        "transaction_id": t.id,
+        "date": t.date.isoformat(),
+        "items": [
+            {
+                "item_id": ti.item_id,
+                "item_name": ti.item.name,
+                "category": ti.item.category,          # ✅ ADDED
+                "quantity": ti.quantity,
+                "price_at_sale": float(ti.price_at_sale)
+            }
+            for ti in t.items
+        ]
     }), 200
 
 
-# ✅ CREATE new sale
-@sales_bp.route('/', methods=['POST'])
-def create_sale():
-    data = request.get_json()
-    item_id = data.get('item_id')
-    quantity_sold = data.get('quantity_sold')
-    sale_date = data.get('date', date.today().isoformat())
+# --------------------------------------------------
+# 🔵 CREATE new transaction (POST /sales)
+# --------------------------------------------------
+@sales_bp.route("/", methods=["POST"])
+def create_transaction():
+    data = request.get_json() or {}
+    cart_items = data.get("items", [])
 
-    # Check item exists
-    item = Item.query.get(item_id)
-    if not item:
-        return jsonify({"error": "Invalid item_id"}), 400
+    if not cart_items:
+        return jsonify({"error": "No items provided"}), 400
 
-    # Prevent overselling
-    if item.quantity < quantity_sold:
-        return jsonify({"error": "Not enough stock"}), 400
+    transaction = SalesTransaction()
+    db.session.add(transaction)
 
-    # Create sale record
-    sale = SalesHistory(
-        item_id=item_id,
-        quantity_sold=quantity_sold,
-        date=date.fromisoformat(sale_date)
-    )
+    for entry in cart_items:
+        item_id = entry.get("item_id")
+        qty = entry.get("quantity")
 
-    # Update item stock
-    item.quantity -= quantity_sold
-    db.session.add(sale)
+        if not item_id or not qty:
+            return jsonify({"error": "item_id and quantity required"}), 400
+
+        item = Item.query.get(item_id)
+        if not item:
+            return jsonify({"error": f"Item {item_id} not found"}), 400
+
+        if item.quantity < qty:
+            return jsonify({"error": f"Not enough stock for {item.name}"}), 400
+
+        item.quantity -= qty
+
+        db.session.add(SalesTransactionItem(
+            transaction=transaction,
+            item=item,
+            quantity=qty,
+            price_at_sale=item.price
+        ))
+
     db.session.commit()
 
     return jsonify({
-        "message": "Sale recorded successfully",
-        "sale_id": sale.id
+        "message": "Transaction recorded",
+        "transaction_id": transaction.id
     }), 201
 
 
-# ✅ UPDATE sale record
-@sales_bp.route('/<int:id>', methods=['PUT'])
-def update_sale(id):
-    sale = SalesHistory.query.get(id)
-    if not sale:
-        return jsonify({"error": "Sale not found"}), 404
+# --------------------------------------------------
+# 🔵 UPDATE transaction (PUT /sales/<id>)
+# --------------------------------------------------
+@sales_bp.route("/<int:id>", methods=["PUT"])
+def update_transaction(id):
+    t = SalesTransaction.query.get(id)
+    if not t:
+        return jsonify({"error": "Transaction not found"}), 404
 
-    data = request.get_json()
+    data = request.get_json() or {}
+    new_items = data.get("items", [])
 
-    # Update fields if provided
-    if "quantity_sold" in data:
-        sale.quantity_sold = data["quantity_sold"]
-    if "date" in data:
-        sale.date = date.fromisoformat(data["date"])
+    if not new_items:
+        return jsonify({"error": "No items provided"}), 400
+
+    # 1️⃣ Restore old stock
+    for ti in t.items:
+        ti.item.quantity += ti.quantity
+
+    # 2️⃣ Remove old transaction items
+    SalesTransactionItem.query.filter_by(transaction_id=t.id).delete()
+
+    # 3️⃣ Add new items
+    for entry in new_items:
+        item_id = entry.get("item_id")
+        qty = entry.get("quantity")
+
+        if not item_id or not qty:
+            return jsonify({"error": "item_id and quantity required"}), 400
+
+        item = Item.query.get(item_id)
+        if not item:
+            return jsonify({"error": f"Item {item_id} not found"}), 400
+
+        if item.quantity < qty:
+            return jsonify({"error": f"Not enough stock for {item.name}"}), 400
+
+        item.quantity -= qty
+
+        db.session.add(SalesTransactionItem(
+            transaction=t,
+            item=item,
+            quantity=qty,
+            price_at_sale=item.price
+        ))
 
     db.session.commit()
-    return jsonify({"message": "Sale updated successfully"}), 200
+
+    return jsonify({
+        "message": "Transaction updated",
+        "transaction_id": t.id
+    }), 200
 
 
-# ✅ DELETE sale record
-@sales_bp.route('/<int:id>', methods=['DELETE'])
-def delete_sale(id):
-    sale = SalesHistory.query.get(id)
-    if not sale:
-        return jsonify({"error": "Sale not found"}), 404
+# --------------------------------------------------
+# 🔵 DELETE transaction (restore stock)
+# --------------------------------------------------
+@sales_bp.route("/<int:id>", methods=["DELETE"])
+def delete_transaction(id):
+    t = SalesTransaction.query.get(id)
+    if not t:
+        return jsonify({"error": "Transaction not found"}), 404
 
-    # Optional: restore stock to the item
-    item = sale.item
-    if item:
-        item.quantity += sale.quantity_sold
+    for ti in t.items:
+        ti.item.quantity += ti.quantity
 
-    db.session.delete(sale)
+    db.session.delete(t)
     db.session.commit()
-    return jsonify({"message": "Sale deleted successfully"}), 200
+
+    return jsonify({"message": "Transaction deleted"}), 200

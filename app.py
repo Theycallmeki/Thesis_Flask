@@ -1,37 +1,63 @@
+# app.py
+# FINAL SAFE VERSION — ML RUNS ONCE, NO CIRCULAR IMPORTS
+
 from flask import Flask
 from flask_cors import CORS
-from db import db
-from urls import register_routes  
-import subprocess
+from dotenv import load_dotenv
 import os
+
+from db import db
+from urls import register_routes
+
+# ✅ Import ML function (SAFE: ML does NOT import app)
+from ml.time_series_forecast import run_time_series_forecast
+
+load_dotenv()
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "http://localhost:3000"}})
 
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///thesis.db'
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+# ------------------------------
+# Database config
+# ------------------------------
+app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv(
+    "DATABASE_URL",
+    "postgresql://postgres:12345678@localhost:5432/THESIS"
+)
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 db.init_app(app)
+
 register_routes(app)
 
-@app.route('/')
+
+@app.route("/")
 def index():
-    return {'message': 'Flask API running successfully'}
+    return {"message": "Flask API running successfully"}
 
-if __name__ == '__main__':
-    with app.app_context():
-        db.create_all()
+
+# ------------------------------
+# APP ENTRY POINT
+# ------------------------------
+if __name__ == "__main__":
+
+    # 🔒 Prevent double-run in Flask debug reloader
+    if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or not app.debug:
+
+        with app.app_context():
+            db.create_all()
+
+            print("\n==============================")
+            print(" Running TIME-SERIES ANALYSIS ")
+            print("==============================\n")
+
+            run_time_series_forecast()
+
+            print("\n==============================")
+            print(" ML ANALYSIS FINISHED ")
+            print("==============================\n")
 
     # ------------------------------
-    # TEMPORARILY DISABLED ML SCRIPT
+    # RUN SERVER
     # ------------------------------
-    # BASE_DIR = os.getcwd()
-    # ML_FOLDER = os.path.join(BASE_DIR, "ml")
-    # ML_SCRIPT = os.path.join(ML_FOLDER, "analyze_behavior.py")
-    #
-    # print("Running ML script:", ML_SCRIPT)
-    #
-    # subprocess.Popen(["python", ML_SCRIPT])
-    # ------------------------------
-
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    app.run(debug=True, host="0.0.0.0", port=5000)
