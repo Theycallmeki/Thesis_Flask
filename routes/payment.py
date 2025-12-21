@@ -6,6 +6,8 @@ from db import db
 from models.item import Item
 import os
 from dotenv import load_dotenv
+from models.sales_transaction import SalesTransaction
+from models.sales_transaction_item import SalesTransactionItem
 
 load_dotenv()
 
@@ -116,12 +118,10 @@ def create_checkout_session():
     return jsonify({"checkoutUrl": checkout_url, "sessionId": data.get("data", {}).get("id")}), 200
 
 
-# Webhook: handle successful payments
 @payment_bp.route("/webhook", methods=["POST"])
 def paymongo_webhook():
     payload = request.get_json()
 
-    # Log the entire webhook for debugging
     print("=== Incoming PayMongo Webhook ===")
     print(json.dumps(payload, indent=4))
     print("=== End Webhook ===")
@@ -132,22 +132,55 @@ def paymongo_webhook():
         session_id = payload["data"]["id"]
         print(f"Payment successful for checkout session: {session_id}")
 
-        # Read cart directly from checkout session metadata
+        # Extract metadata cart
         session_data = payload["data"]["attributes"].get("data", {}).get("attributes", {})
         metadata = session_data.get("metadata", {})
         cart_json = metadata.get("cart", "[]")
         cart_items = json.loads(cart_json)
 
-        # Update inventory quantities
-        for item in cart_items:
-            barcode = item["barcode"]
-            quantity = item.get("quantity", 1)
-            db_item = Item.query.filter_by(barcode=barcode).first()
-            if db_item:
-                old_qty = db_item.quantity
-                db_item.quantity = max(0, db_item.quantity - quantity)
-                db.session.commit()
-                print(f"Updated {db_item.name}: {old_qty} → {db_item.quantity}")
+        try:
+            # Create sales transaction
+            transaction = SalesTransaction()
+            db.session.add(transaction)
+            db.session.flush()  # get transaction.id
+
+            # Process each cart item
+            for cart_item in cart_items:
+                barcode = cart_item["barcode"]
+                quantity = cart_item.get("quantity", 1)
+
+                item = Item.query.filter_by(barcode=barcode).first()
+                if not item:
+                    raise Exception(f"Item not found: {barcode}")
+
+                if item.quantity < quantity:
+                    raise Exception(f"Insufficient stock for {item.name}")
+
+                # Create transaction item
+                tx_item = SalesTransactionItem(
+                    transaction_id=transaction.id,
+                    item_id=item.id,
+                    quantity=quantity,
+                    price_at_sale=item.price
+                )
+                db.session.add(tx_item)
+
+                # Update inventory
+                item.quantity -= quantity
+
+                print(
+                    f"Sold {quantity}x {item.name} | Remaining stock: {item.quantity}"
+                )
+
+            # Commit everything once
+            db.session.commit()
+            print(f"Sales transaction {transaction.id} recorded successfully")
+
+        except Exception as e:
+            db.session.rollback()
+            print("Payment processing failed:", str(e))
+            return jsonify({"error": str(e)}), 500
 
     return jsonify({"status": "success"}), 200
+
 
