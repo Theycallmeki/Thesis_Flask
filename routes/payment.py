@@ -5,15 +5,17 @@ from requests.auth import HTTPBasicAuth
 import json
 from db import db
 from models.item import Item
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 payment_bp = Blueprint("payment", __name__, url_prefix="/payment")
 
-PAYMONGO_SECRET_KEY = "sk_test_ZmAd5jPPHWax3XAxbyrQPexq"
+PAYMONGO_SECRET_KEY = os.getenv("PAYMONGO_TEST_SECRET_KEY", "")
 auth = HTTPBasicAuth(PAYMONGO_SECRET_KEY, "")
 
-# -------------------------------
 # Create Payment Intent (GCash)
-# -------------------------------
 @payment_bp.route("/intent", methods=["POST"])
 def create_payment_intent():
     data = request.get_json()
@@ -46,10 +48,7 @@ def create_payment_intent():
     payment_intent_id = data.get("data", {}).get("id")
     return jsonify({"id": payment_intent_id}), response.status_code
 
-
-# -------------------------------
 # Create Checkout Session
-# -------------------------------
 @payment_bp.route("/checkout", methods=["POST"])
 def create_checkout_session():
     data = request.get_json()
@@ -105,9 +104,8 @@ def create_checkout_session():
     return jsonify({"checkoutUrl": checkout_url}), 200
 
 
-# -------------------------------
+
 # Webhook: handle successful payments
-# -------------------------------
 @payment_bp.route("/webhook", methods=["POST"])
 def paymongo_webhook():
     payload = request.get_json()
