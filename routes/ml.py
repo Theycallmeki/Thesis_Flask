@@ -1,50 +1,60 @@
-# routes/ml.py  (FIXED — NO 3 DAYS)
+# routes/ml.py
+# DEMAND FORECAST + ITEM MOVEMENT FORECAST (SAFE)
+
 from flask import Blueprint, jsonify, request
-from ml.time_series_forecast import run_time_series_forecast
-from models.ai_forecast import AIForecast
 from db import db
+
+from ml.time_series_forecast import run_time_series_forecast
+from ml.item_movement_forecast import run_item_movement_forecast
+
+from models.ai_forecast import AIForecast
+from models.ai_item_movement import AIItemMovement
 
 ml_bp = Blueprint("ml_bp", __name__)
 
-# ---------------------------------
-# CREATE (run model + save)
-# ---------------------------------
+# =================================================
+# DEMAND FORECAST
+# =================================================
+
 @ml_bp.route("/forecast", methods=["POST"])
 def create_forecast():
-    result = run_time_series_forecast()
-    if result is None:
-        return jsonify({"success": False, "message": "Not enough data"}), 400
+    try:
+        result = run_time_series_forecast()
+        if result is None:
+            return jsonify({"success": False, "message": "Not enough data"}), 400
 
-    AIForecast.query.delete()
+        AIForecast.query.delete()
 
-    for cat, qty in result["tomorrow"].items():
-        db.session.add(AIForecast(
-            horizon="tomorrow",
-            category=cat,
-            predicted_quantity=int(round(qty))
-        ))
+        for cat, qty in result["tomorrow"].items():
+            db.session.add(AIForecast(
+                horizon="tomorrow",
+                category=cat,
+                predicted_quantity=int(round(qty))
+            ))
 
-    for cat, qty in result["next_7_days"].items():
-        db.session.add(AIForecast(
-            horizon="7_days",
-            category=cat,
-            predicted_quantity=qty
-        ))
+        for cat, qty in result["next_7_days"].items():
+            db.session.add(AIForecast(
+                horizon="7_days",
+                category=cat,
+                predicted_quantity=qty
+            ))
 
-    for cat, qty in result["next_30_days"].items():
-        db.session.add(AIForecast(
-            horizon="30_days",
-            category=cat,
-            predicted_quantity=qty
-        ))
+        for cat, qty in result["next_30_days"].items():
+            db.session.add(AIForecast(
+                horizon="30_days",
+                category=cat,
+                predicted_quantity=qty
+            ))
 
-    db.session.commit()
-    return jsonify({"success": True}), 201
+        db.session.commit()
+        return jsonify({"success": True}), 201
+
+    except Exception as e:
+        db.session.rollback()
+        print("🔥 DEMAND FORECAST ERROR:", e)
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
-# ---------------------------------
-# READ (GROUPED JSON — CLEAN)
-# ---------------------------------
 @ml_bp.route("/forecast", methods=["GET"])
 def get_forecasts_grouped():
     forecasts = AIForecast.query.order_by(AIForecast.category).all()
@@ -73,9 +83,6 @@ def get_forecasts_grouped():
     return jsonify(grouped), 200
 
 
-# ---------------------------------
-# UPDATE
-# ---------------------------------
 @ml_bp.route("/forecast/<int:id>", methods=["PUT"])
 def update_forecast(id):
     forecast = AIForecast.query.get(id)
@@ -90,9 +97,6 @@ def update_forecast(id):
     return jsonify({"success": True}), 200
 
 
-# ---------------------------------
-# DELETE
-# ---------------------------------
 @ml_bp.route("/forecast/<int:id>", methods=["DELETE"])
 def delete_forecast(id):
     forecast = AIForecast.query.get(id)
@@ -102,3 +106,38 @@ def delete_forecast(id):
     db.session.delete(forecast)
     db.session.commit()
     return jsonify({"success": True}), 200
+
+
+# =================================================
+# ITEM MOVEMENT FORECAST (NEURAL NETWORK SAFE)
+# =================================================
+
+@ml_bp.route("/item-movement-forecast", methods=["POST"])
+def create_item_movement_forecast():
+    try:
+        ok = run_item_movement_forecast()
+        if not ok:
+            return jsonify({"success": False, "message": "Not enough data"}), 400
+        return jsonify({"success": True}), 201
+
+    except Exception as e:
+        db.session.rollback()
+        print("🔥 ITEM MOVEMENT ERROR:", e)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@ml_bp.route("/item-movement-forecast", methods=["GET"])
+def get_item_movement_forecast():
+    records = AIItemMovement.query.order_by(AIItemMovement.category).all()
+    return jsonify([
+        {
+            "item_id": r.item_id,
+            "item_name": r.item_name,
+            "category": r.category,
+            "avg_daily_sales": r.avg_daily_sales,
+            "days_since_last_sale": r.days_since_last_sale,
+            "movement_class": r.movement_class,
+            "created_at": r.created_at.isoformat()
+        }
+        for r in records
+    ]), 200
