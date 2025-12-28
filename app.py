@@ -1,26 +1,32 @@
 # app.py
-# FINAL SAFE VERSION — ML RUNS VIA API ONLY
+# FINAL SAFE VERSION — NO .env
 
 from flask import Flask
 from flask_cors import CORS
-from dotenv import load_dotenv
 import os
 
 from db import db
 from urls import register_routes
 
-load_dotenv()
-
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "http://localhost:3000"}})
+
+# ✅ REQUIRED for JWT signing
+app.config["SECRET_KEY"] = "super-secret"   # hard-coded
+
+# ✅ COOKIE SETTINGS
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Strict"
+
+CORS(
+    app,
+    supports_credentials=True,
+    resources={r"/*": {"origins": "http://localhost:3000"}}
+)
 
 # ------------------------------
 # Database config
 # ------------------------------
-app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv(
-    "DATABASE_URL",
-    "postgresql://postgres:12345678@localhost:5432/pusa"
-)
+app.config["SQLALCHEMY_DATABASE_URI"] = "postgresql://postgres:12345678@localhost:5432/niggas"
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 db.init_app(app)
@@ -40,4 +46,3 @@ if __name__ == "__main__":
         db.create_all()
 
     app.run(debug=True, host="0.0.0.0", port=5000)
-# urls.py

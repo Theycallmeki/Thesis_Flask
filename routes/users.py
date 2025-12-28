@@ -1,80 +1,166 @@
-from flask import Blueprint, request, jsonify
+# routes/users.py  (FULL FILE – supports http://localhost:5000/users)
+
+from flask import Blueprint, request, jsonify, make_response
 from db import db
-from datetime import datetime
-from models.user import User  # Correct import from models/user.py
+from datetime import datetime, timedelta
+from models.user import User
+import jwt
 
 user_routes = Blueprint('user_routes', __name__)
 
-# GET all users
+# 🔐 JWT CONFIG (NO .env)
+JWT_SECRET = "super-secret"
+ACCESS_EXPIRES = timedelta(minutes=15)
+REFRESH_EXPIRES = timedelta(days=7)
+
+
+def create_token(user_id, token_type="access"):
+    payload = {
+        "user_id": user_id,
+        "type": token_type,
+        "exp": datetime.utcnow() + (
+            ACCESS_EXPIRES if token_type == "access" else REFRESH_EXPIRES
+        )
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm="HS256")
+
+
+# =========================
+# GET ALL USERS
+# =========================
+@user_routes.route('', methods=['GET'])
 @user_routes.route('/', methods=['GET'])
 def get_users():
     users = User.query.all()
-    users_list = [
+    return jsonify([
         {
-            "id": u.id, 
-            "username": u.username, 
-            "created_at": u.created_at, 
+            "id": u.id,
+            "username": u.username,
+            "role": u.role,
+            "created_at": u.created_at,
             "updated_at": u.updated_at
-        } 
+        }
         for u in users
-    ]
-    return jsonify(users_list), 200
+    ]), 200
 
-# GET a single user by id
+
+# =========================
+# GET USER BY ID
+# =========================
 @user_routes.route('/<int:id>', methods=['GET'])
 def get_user(id):
     user = User.query.get(id)
     if not user:
-        return jsonify({"error": "User not found"}), 404
+        return jsonify({"error": "user not found"}), 404
+
     return jsonify({
-        "id": user.id, 
-        "username": user.username, 
-        "created_at": user.created_at, 
+        "id": user.id,
+        "username": user.username,
+        "role": user.role,
+        "created_at": user.created_at,
         "updated_at": user.updated_at
     }), 200
 
-# CREATE a new user
+
+# =========================
+# CREATE USER
+# =========================
+@user_routes.route('', methods=['POST'])
 @user_routes.route('/', methods=['POST'])
 def create_user():
-    data = request.json
-    if not data.get('username') or not data.get('password'):
-        return jsonify({"error": "Username and password required"}), 400
+    data = request.json or {}
 
-    if User.query.filter_by(username=data['username']).first():
-        return jsonify({"error": "Username already exists"}), 400
+    if not data.get("username") or not data.get("password"):
+        return jsonify({"error": "username and password required"}), 400
 
-    new_user = User(
-        username=data['username'],
-        password=data['password']  # Hash this in production!
+    if User.query.filter_by(username=data["username"]).first():
+        return jsonify({"error": "username exists"}), 400
+
+    user = User(
+        username=data["username"],
+        password=data["password"],  # hash later
+        role=data.get("role", "customer")
     )
-    db.session.add(new_user)
+
+    db.session.add(user)
     db.session.commit()
-    return jsonify({"message": "User created", "id": new_user.id}), 201
 
-# UPDATE a user
-@user_routes.route('/<int:id>', methods=['PUT'])
-def update_user(id):
-    user = User.query.get(id)
-    if not user:
-        return jsonify({"error": "User not found"}), 404
+    return jsonify({
+        "message": "user created",
+        "id": user.id
+    }), 201
 
-    data = request.json
-    if 'username' in data:
-        user.username = data['username']
-    if 'password' in data:
-        user.password = data['password']  # Hash this in production!
-    user.updated_at = datetime.utcnow()
 
+# =========================
+# LOGIN (COOKIE BASED)
+# =========================
+@user_routes.route('/login', methods=['POST'])
+def login():
+    data = request.json or {}
+
+    user = User.query.filter_by(username=data.get("username")).first()
+    if not user or user.password != data.get("password"):
+        return jsonify({"error": "invalid credentials"}), 401
+
+    access_token = create_token(user.id, "access")
+    refresh_token = create_token(user.id, "refresh")
+
+    user.refresh_token = refresh_token
     db.session.commit()
-    return jsonify({"message": "User updated"}), 200
 
-# DELETE a user
-@user_routes.route('/<int:id>', methods=['DELETE'])
-def delete_user(id):
-    user = User.query.get(id)
-    if not user:
-        return jsonify({"error": "User not found"}), 404
+    resp = make_response(jsonify({
+        "message": "login success",
+        "role": user.role
+    }))
 
-    db.session.delete(user)
-    db.session.commit()
-    return jsonify({"message": "User deleted"}), 200
+    resp.set_cookie("access_token", access_token, httponly=True, samesite="Strict")
+    resp.set_cookie("refresh_token", refresh_token, httponly=True, samesite="Strict")
+
+    return resp, 200
+
+
+# =========================
+# REFRESH TOKEN
+# =========================
+@user_routes.route('/refresh', methods=['POST'])
+def refresh():
+    token = request.cookies.get("refresh_token")
+    if not token:
+        return jsonify({"error": "no refresh token"}), 401
+
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+
+        if payload["type"] != "refresh":
+            return jsonify({"error": "invalid token type"}), 401
+
+        user = User.query.get(payload["user_id"])
+        if not user or user.refresh_token != token:
+            return jsonify({"error": "invalid refresh"}), 401
+
+        new_access = create_token(user.id, "access")
+
+        resp = make_response(jsonify({"message": "token refreshed"}))
+        resp.set_cookie("access_token", new_access, httponly=True, samesite="Strict")
+        return resp, 200
+
+    except:
+        return jsonify({"error": "invalid refresh token"}), 401
+
+
+# =========================
+# LOGOUT
+# =========================
+@user_routes.route('/logout', methods=['POST'])
+def logout():
+    token = request.cookies.get("refresh_token")
+    if token:
+        user = User.query.filter_by(refresh_token=token).first()
+        if user:
+            user.refresh_token = None
+            db.session.commit()
+
+    resp = make_response(jsonify({"message": "logged out"}))
+    resp.delete_cookie("access_token")
+    resp.delete_cookie("refresh_token")
+    return resp, 200
