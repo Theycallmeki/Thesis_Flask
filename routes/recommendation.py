@@ -30,3 +30,26 @@ def get_recommendations(user_id):
             for item in items
         ]
     }), 200
+
+# GET recommendations for ALL users
+@recommendations_bp.route("/recommendations", methods=["GET"])
+def get_all_recommendations():
+    with current_app.app_context():
+        users = User.query.all()
+        if not users:
+            return jsonify({"message": "No users found"}), 200
+
+        user_item_matrix = build_user_item_matrix()  # build once for all users
+        all_recommendations = []
+
+        for user in users:
+            items = recommend_products(user.id, user_item_matrix=user_item_matrix)
+            all_recommendations.append({
+                "user_id": user.id,
+                "recommendations": [
+                    {"id": item.id, "name": item.name, "category": item.category, "price": float(item.price)}
+                    for item in items
+                ]
+            })
+
+    return jsonify(all_recommendations), 200
