@@ -20,6 +20,7 @@ def get_all_transactions():
         result.append({
             "transaction_id": t.id,
             "date": t.date.isoformat(),
+            "user_id": t.user.id,
             "items": [
                 {
                     "item_id": ti.item_id,
@@ -47,6 +48,7 @@ def get_transaction(id):
     return jsonify({
         "transaction_id": t.id,
         "date": t.date.isoformat(),
+        "user_id": t.user.id,
         "items": [
             {
                 "item_id": ti.item_id,
@@ -66,7 +68,11 @@ def get_transaction(id):
 @sales_bp.route("/", methods=["POST"])
 def create_transaction():
     data = request.get_json() or {}
+    user_id = data.get("user_id")
     cart_items = data.get("items", [])
+
+    if not user_id:
+        return jsonify({"error": "user_id is required"}), 400
 
     if not cart_items:
         return jsonify({"error": "No items provided"}), 400
