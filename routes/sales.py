@@ -6,12 +6,15 @@ from models.sales_transaction import SalesTransaction
 from models.sales_transaction_item import SalesTransactionItem
 from models.item import Item
 
+from utils.auth_restrict import require_auth
+
 sales_bp = Blueprint("sales", __name__)
 
 # --------------------------------------------------
 # 🔵 GET all transactions
 # --------------------------------------------------
 @sales_bp.route("/", methods=["GET"])
+@require_auth()
 def get_all_transactions():
     transactions = SalesTransaction.query.all()
     result = []
@@ -40,6 +43,7 @@ def get_all_transactions():
 # 🔵 GET a single transaction by ID
 # --------------------------------------------------
 @sales_bp.route("/<int:id>", methods=["GET"])
+@require_auth()
 def get_transaction(id):
     t = SalesTransaction.query.get(id)
     if not t:
@@ -66,6 +70,7 @@ def get_transaction(id):
 # 🔵 CREATE new transaction (POST /sales)
 # --------------------------------------------------
 @sales_bp.route("/", methods=["POST"])
+@require_auth()
 def create_transaction():
     data = request.get_json() or {}
     user_id = data.get("user_id")
@@ -115,6 +120,7 @@ def create_transaction():
 # 🔵 UPDATE transaction (PUT /sales/<id>)
 # --------------------------------------------------
 @sales_bp.route("/<int:id>", methods=["PUT"])
+@require_auth()
 def update_transaction(id):
     t = SalesTransaction.query.get(id)
     if not t:
@@ -169,6 +175,7 @@ def update_transaction(id):
 # 🔵 DELETE transaction (restore stock)
 # --------------------------------------------------
 @sales_bp.route("/<int:id>", methods=["DELETE"])
+@require_auth()
 def delete_transaction(id):
     t = SalesTransaction.query.get(id)
     if not t:

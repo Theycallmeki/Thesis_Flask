@@ -1,6 +1,9 @@
 from flask import Blueprint, request, jsonify
 from models.item import Item
 from models.sales_transaction_item import SalesTransactionItem
+
+from utils.auth_restrict import require_auth
+
 from db import db
 
 items_bp = Blueprint('items', __name__)
@@ -11,6 +14,7 @@ def valid_categories():
 
 # 🟢 GET all items
 @items_bp.route('/', methods=['GET'])
+@require_auth()
 def get_items():
     try:
         items = Item.query.all()
@@ -30,6 +34,7 @@ def get_items():
 
 # 🟢 GET item by ID
 @items_bp.route('/<int:id>', methods=['GET'])
+@require_auth()
 def get_item_by_id(id):
     try:
         item = Item.query.get(id)
@@ -50,6 +55,7 @@ def get_item_by_id(id):
 
 # 🟢 GET item by barcode
 @items_bp.route('/barcode/<string:barcode>', methods=['GET'])
+@require_auth()
 def get_item_by_barcode(barcode):
     try:
         item = Item.query.filter_by(barcode=barcode).first()
@@ -70,6 +76,7 @@ def get_item_by_barcode(barcode):
 
 # 🟢 CREATE item
 @items_bp.route('/', methods=['POST'])
+@require_auth()
 def create_item():
     try:
         data = request.get_json() or {}
@@ -126,6 +133,7 @@ def create_item():
 
 # 🟡 UPDATE item
 @items_bp.route('/<int:id>', methods=['PUT'])
+@require_auth()
 def update_item(id):
     try:
         data = request.get_json() or {}
@@ -180,6 +188,7 @@ def update_item(id):
 
 # 🔴 DELETE item
 @items_bp.route('/<int:id>', methods=['DELETE'])
+@require_auth()
 def delete_item(id):
     try:
         item = Item.query.get(id)
