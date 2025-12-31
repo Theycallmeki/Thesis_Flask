@@ -1,6 +1,5 @@
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, g
 from db import db
-from datetime import datetime
 
 from models.sales_transaction import SalesTransaction
 from models.sales_transaction_item import SalesTransactionItem
@@ -11,10 +10,10 @@ from utils.auth_restrict import require_auth
 sales_bp = Blueprint("sales", __name__)
 
 # --------------------------------------------------
-# 🔵 GET all transactions
+# 🔵 GET all transactions (ADMIN ONLY)
 # --------------------------------------------------
 @sales_bp.route("/", methods=["GET"])
-@require_auth()
+@require_auth(roles=("admin",))
 def get_all_transactions():
     transactions = SalesTransaction.query.all()
     result = []
@@ -28,7 +27,7 @@ def get_all_transactions():
                 {
                     "item_id": ti.item_id,
                     "item_name": ti.item.name,
-                    "category": ti.item.category,          # ✅ ADDED
+                    "category": ti.item.category,
                     "quantity": ti.quantity,
                     "price_at_sale": float(ti.price_at_sale)
                 }
@@ -40,10 +39,10 @@ def get_all_transactions():
 
 
 # --------------------------------------------------
-# 🔵 GET a single transaction by ID
+# 🔵 GET a single transaction by ID (ADMIN ONLY)
 # --------------------------------------------------
 @sales_bp.route("/<int:id>", methods=["GET"])
-@require_auth()
+@require_auth(roles=("admin",))
 def get_transaction(id):
     t = SalesTransaction.query.get(id)
     if not t:
@@ -57,7 +56,7 @@ def get_transaction(id):
             {
                 "item_id": ti.item_id,
                 "item_name": ti.item.name,
-                "category": ti.item.category,          # ✅ ADDED
+                "category": ti.item.category,
                 "quantity": ti.quantity,
                 "price_at_sale": float(ti.price_at_sale)
             }
@@ -67,22 +66,20 @@ def get_transaction(id):
 
 
 # --------------------------------------------------
-# 🔵 CREATE new transaction (POST /sales)
+# 🟢 CREATE new transaction (EVERY LOGGED-IN USER)
 # --------------------------------------------------
 @sales_bp.route("/", methods=["POST"])
-@require_auth()
+@require_auth(roles=None)   # ✅ allow admin, customer, staff
 def create_transaction():
     data = request.get_json() or {}
-    user_id = data.get("user_id")
     cart_items = data.get("items", [])
-
-    if not user_id:
-        return jsonify({"error": "user_id is required"}), 400
 
     if not cart_items:
         return jsonify({"error": "No items provided"}), 400
 
-    transaction = SalesTransaction()
+    transaction = SalesTransaction(
+        user_id=g.current_user.id   # ✅ always valid
+    )
     db.session.add(transaction)
 
     for entry in cart_items:
@@ -117,10 +114,10 @@ def create_transaction():
 
 
 # --------------------------------------------------
-# 🔵 UPDATE transaction (PUT /sales/<id>)
+# 🔵 UPDATE transaction (ADMIN ONLY)
 # --------------------------------------------------
 @sales_bp.route("/<int:id>", methods=["PUT"])
-@require_auth()
+@require_auth(roles=("admin",))
 def update_transaction(id):
     t = SalesTransaction.query.get(id)
     if not t:
@@ -132,14 +129,12 @@ def update_transaction(id):
     if not new_items:
         return jsonify({"error": "No items provided"}), 400
 
-    # 1️⃣ Restore old stock
+    # Restore stock
     for ti in t.items:
         ti.item.quantity += ti.quantity
 
-    # 2️⃣ Remove old transaction items
     SalesTransactionItem.query.filter_by(transaction_id=t.id).delete()
 
-    # 3️⃣ Add new items
     for entry in new_items:
         item_id = entry.get("item_id")
         qty = entry.get("quantity")
@@ -172,10 +167,10 @@ def update_transaction(id):
 
 
 # --------------------------------------------------
-# 🔵 DELETE transaction (restore stock)
+# 🔴 DELETE transaction (ADMIN ONLY)
 # --------------------------------------------------
 @sales_bp.route("/<int:id>", methods=["DELETE"])
-@require_auth()
+@require_auth(roles=("admin",))
 def delete_transaction(id):
     t = SalesTransaction.query.get(id)
     if not t:
