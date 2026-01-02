@@ -1,16 +1,21 @@
 # routes/ml.py
-# DEMAND FORECAST + ITEM MOVEMENT FORECAST (SAFE)
+# DEMAND FORECAST + ITEM MOVEMENT FORECAST + STOCKOUT RISK (SAFE)
 
 from flask import Blueprint, jsonify, request
+from sqlalchemy import case
+
 from db import db
 
 from ml.time_series_forecast import run_time_series_forecast
 from ml.item_movement_forecast import run_item_movement_forecast
+from ml.stockout_risk_forecast import run_stockout_risk_forecast
 
 from models.ai_forecast import AIForecast
 from models.ai_item_movement import AIItemMovement
+from models.ai_stockout_risk import AIStockoutRisk
 
 from utils.auth_restrict import require_auth
+
 
 ml_bp = Blueprint("ml_bp", __name__)
 
@@ -145,6 +150,56 @@ def get_item_movement_forecast():
             "avg_daily_sales": r.avg_daily_sales,
             "days_since_last_sale": r.days_since_last_sale,
             "movement_class": r.movement_class,
+            "created_at": r.created_at.isoformat()
+        }
+        for r in records
+    ]), 200
+
+
+# =================================================
+# STOCK-OUT RISK FORECAST (NEURAL NETWORK SAFE)
+# =================================================
+
+@ml_bp.route("/stockout-risk", methods=["POST"])
+@require_auth()
+def create_stockout_risk():
+    try:
+        ok = run_stockout_risk_forecast()
+        if not ok:
+            return jsonify({"success": False, "message": "Not enough data"}), 400
+        return jsonify({"success": True}), 201
+
+    except Exception as e:
+        db.session.rollback()
+        print("🔥 STOCKOUT RISK ERROR:", e)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@ml_bp.route("/stockout-risk", methods=["GET"])
+@require_auth()
+def get_stockout_risk():
+    priority_order = case(
+        (AIStockoutRisk.risk_level == "High", 1),
+        (AIStockoutRisk.risk_level == "Medium", 2),
+        (AIStockoutRisk.risk_level == "Low", 3),
+        else_=4
+    )
+
+    records = (
+        AIStockoutRisk.query
+        .order_by(priority_order, AIStockoutRisk.category)
+        .all()
+    )
+
+    return jsonify([
+        {
+            "item_id": r.item_id,
+            "item_name": r.item_name,
+            "category": r.category,
+            "current_stock": r.current_stock,
+            "avg_daily_sales": r.avg_daily_sales,
+            "days_of_stock_left": r.days_of_stock_left,
+            "risk_level": r.risk_level,
             "created_at": r.created_at.isoformat()
         }
         for r in records
