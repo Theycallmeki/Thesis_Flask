@@ -1,11 +1,13 @@
-# routes/users.py  (FULL FILE – COOKIE AUTH + /me – LOCALHOST FIXED)
+# routes/users.py
+# FULL FILE — COOKIE AUTH + /me — CORS SAFE
 
 from flask import Blueprint, request, jsonify, make_response, g
 from db import db
 from datetime import datetime, timedelta
 from models.user import User
 import jwt
-from functools import wraps
+
+from utils.auth_restrict import require_auth  # ✅ USE SINGLE AUTH
 
 user_routes = Blueprint("user_routes", __name__)
 
@@ -15,6 +17,9 @@ ACCESS_EXPIRES = timedelta(minutes=15)
 REFRESH_EXPIRES = timedelta(days=7)
 
 
+# --------------------------------------------------
+# TOKEN CREATION
+# --------------------------------------------------
 def create_token(user_id, token_type="access"):
     payload = {
         "user_id": user_id,
@@ -25,48 +30,11 @@ def create_token(user_id, token_type="access"):
     return jwt.encode(payload, JWT_SECRET, algorithm="HS256")
 
 
-# =========================
-# AUTH DECORATOR (ADMIN)
-# =========================
-def require_auth(roles=("admin",)):
-    def decorator(fn):
-        @wraps(fn)
-        def wrapper(*args, **kwargs):
-            token = request.cookies.get("access_token")
-
-            if not token:
-                return jsonify({"error": "Authentication required"}), 401
-
-            try:
-                payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
-
-                if payload.get("type") != "access":
-                    return jsonify({"error": "Invalid token type"}), 401
-
-                user = User.query.get(payload["user_id"])
-                if not user:
-                    return jsonify({"error": "User not found"}), 401
-
-                if roles and user.role not in roles:
-                    return jsonify({"error": "Forbidden"}), 403
-
-                g.current_user = user
-
-            except jwt.ExpiredSignatureError:
-                return jsonify({"error": "Token expired"}), 401
-            except jwt.InvalidTokenError:
-                return jsonify({"error": "Invalid token"}), 401
-
-            return fn(*args, **kwargs)
-        return wrapper
-    return decorator
-
-
-# =========================
+# --------------------------------------------------
 # GET CURRENT USER (USED BY VUE)
-# =========================
+# --------------------------------------------------
 @user_routes.route("/me", methods=["GET"])
-@require_auth(roles=("admin",))
+@require_auth(roles=None)   # admin / staff / customer
 def me():
     user = g.current_user
     return jsonify({
@@ -77,9 +45,9 @@ def me():
     }), 200
 
 
-# =========================
+# --------------------------------------------------
 # GET ALL USERS
-# =========================
+# --------------------------------------------------
 @user_routes.route("", methods=["GET"])
 @user_routes.route("/", methods=["GET"])
 def get_users():
@@ -96,9 +64,9 @@ def get_users():
     ]), 200
 
 
-# =========================
+# --------------------------------------------------
 # GET USER BY ID
-# =========================
+# --------------------------------------------------
 @user_routes.route("/<int:id>", methods=["GET"])
 def get_user(id):
     user = User.query.get(id)
@@ -114,9 +82,9 @@ def get_user(id):
     }), 200
 
 
-# =========================
+# --------------------------------------------------
 # CREATE USER
-# =========================
+# --------------------------------------------------
 @user_routes.route("", methods=["POST"])
 @user_routes.route("/", methods=["POST"])
 def create_user():
@@ -140,9 +108,9 @@ def create_user():
     return jsonify({"message": "user created", "id": user.id}), 201
 
 
-# =========================
-# LOGIN (COOKIE BASED – LOCALHOST)
-# =========================
+# --------------------------------------------------
+# LOGIN (COOKIE BASED)
+# --------------------------------------------------
 @user_routes.route("/login", methods=["POST"])
 def login():
     data = request.json or {}
@@ -162,27 +130,28 @@ def login():
         "role": user.role
     }))
 
+    # ✅ MUST MATCH CORS (SameSite=None)
     resp.set_cookie(
         "access_token",
         access_token,
         httponly=True,
-        samesite="Lax",
+        samesite="None",
         secure=False
     )
     resp.set_cookie(
         "refresh_token",
         refresh_token,
         httponly=True,
-        samesite="Lax",
+        samesite="None",
         secure=False
     )
 
     return resp, 200
 
 
-# =========================
+# --------------------------------------------------
 # REFRESH TOKEN
-# =========================
+# --------------------------------------------------
 @user_routes.route("/refresh", methods=["POST"])
 def refresh():
     token = request.cookies.get("refresh_token")
@@ -206,7 +175,7 @@ def refresh():
             "access_token",
             new_access,
             httponly=True,
-            samesite="Lax",
+            samesite="None",
             secure=False
         )
         return resp, 200
@@ -215,9 +184,9 @@ def refresh():
         return jsonify({"error": "invalid refresh token"}), 401
 
 
-# =========================
+# --------------------------------------------------
 # LOGOUT
-# =========================
+# --------------------------------------------------
 @user_routes.route("/logout", methods=["POST"])
 def logout():
     token = request.cookies.get("refresh_token")
