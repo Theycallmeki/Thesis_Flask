@@ -1,14 +1,15 @@
-# routes/users.py  (FULL FILE – supports http://localhost:5000/users)
+# routes/users.py  (FULL FILE – COOKIE AUTH + /me – LOCALHOST FIXED)
 
-from flask import Blueprint, request, jsonify, make_response
+from flask import Blueprint, request, jsonify, make_response, g
 from db import db
 from datetime import datetime, timedelta
 from models.user import User
 import jwt
+from functools import wraps
 
-user_routes = Blueprint('user_routes', __name__)
+user_routes = Blueprint("user_routes", __name__)
 
-# 🔐 JWT CONFIG (NO .env)
+# 🔐 JWT CONFIG
 JWT_SECRET = "super-secret"
 ACCESS_EXPIRES = timedelta(minutes=15)
 REFRESH_EXPIRES = timedelta(days=7)
@@ -18,18 +19,69 @@ def create_token(user_id, token_type="access"):
     payload = {
         "user_id": user_id,
         "type": token_type,
-        "exp": datetime.utcnow() + (
-            ACCESS_EXPIRES if token_type == "access" else REFRESH_EXPIRES
-        )
+        "exp": datetime.utcnow()
+        + (ACCESS_EXPIRES if token_type == "access" else REFRESH_EXPIRES),
     }
     return jwt.encode(payload, JWT_SECRET, algorithm="HS256")
 
 
 # =========================
+# AUTH DECORATOR (ADMIN)
+# =========================
+def require_auth(roles=("admin",)):
+    def decorator(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            token = request.cookies.get("access_token")
+
+            if not token:
+                return jsonify({"error": "Authentication required"}), 401
+
+            try:
+                payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+
+                if payload.get("type") != "access":
+                    return jsonify({"error": "Invalid token type"}), 401
+
+                user = User.query.get(payload["user_id"])
+                if not user:
+                    return jsonify({"error": "User not found"}), 401
+
+                if roles and user.role not in roles:
+                    return jsonify({"error": "Forbidden"}), 403
+
+                g.current_user = user
+
+            except jwt.ExpiredSignatureError:
+                return jsonify({"error": "Token expired"}), 401
+            except jwt.InvalidTokenError:
+                return jsonify({"error": "Invalid token"}), 401
+
+            return fn(*args, **kwargs)
+        return wrapper
+    return decorator
+
+
+# =========================
+# GET CURRENT USER (USED BY VUE)
+# =========================
+@user_routes.route("/me", methods=["GET"])
+@require_auth(roles=("admin",))
+def me():
+    user = g.current_user
+    return jsonify({
+        "authenticated": True,
+        "id": user.id,
+        "username": user.username,
+        "role": user.role
+    }), 200
+
+
+# =========================
 # GET ALL USERS
 # =========================
-@user_routes.route('', methods=['GET'])
-@user_routes.route('/', methods=['GET'])
+@user_routes.route("", methods=["GET"])
+@user_routes.route("/", methods=["GET"])
 def get_users():
     users = User.query.all()
     return jsonify([
@@ -38,7 +90,7 @@ def get_users():
             "username": u.username,
             "role": u.role,
             "created_at": u.created_at,
-            "updated_at": u.updated_at
+            "updated_at": u.updated_at,
         }
         for u in users
     ]), 200
@@ -47,7 +99,7 @@ def get_users():
 # =========================
 # GET USER BY ID
 # =========================
-@user_routes.route('/<int:id>', methods=['GET'])
+@user_routes.route("/<int:id>", methods=["GET"])
 def get_user(id):
     user = User.query.get(id)
     if not user:
@@ -58,15 +110,15 @@ def get_user(id):
         "username": user.username,
         "role": user.role,
         "created_at": user.created_at,
-        "updated_at": user.updated_at
+        "updated_at": user.updated_at,
     }), 200
 
 
 # =========================
 # CREATE USER
 # =========================
-@user_routes.route('', methods=['POST'])
-@user_routes.route('/', methods=['POST'])
+@user_routes.route("", methods=["POST"])
+@user_routes.route("/", methods=["POST"])
 def create_user():
     data = request.json or {}
 
@@ -78,23 +130,20 @@ def create_user():
 
     user = User(
         username=data["username"],
-        password=data["password"],  # hash later
-        role=data.get("role", "customer")
+        password=data["password"],
+        role=data.get("role", "customer"),
     )
 
     db.session.add(user)
     db.session.commit()
 
-    return jsonify({
-        "message": "user created",
-        "id": user.id
-    }), 201
+    return jsonify({"message": "user created", "id": user.id}), 201
 
 
 # =========================
-# LOGIN (COOKIE BASED)
+# LOGIN (COOKIE BASED – LOCALHOST)
 # =========================
-@user_routes.route('/login', methods=['POST'])
+@user_routes.route("/login", methods=["POST"])
 def login():
     data = request.json or {}
 
@@ -113,8 +162,20 @@ def login():
         "role": user.role
     }))
 
-    resp.set_cookie("access_token", access_token, httponly=True, samesite="Strict")
-    resp.set_cookie("refresh_token", refresh_token, httponly=True, samesite="Strict")
+    resp.set_cookie(
+        "access_token",
+        access_token,
+        httponly=True,
+        samesite="Lax",
+        secure=False
+    )
+    resp.set_cookie(
+        "refresh_token",
+        refresh_token,
+        httponly=True,
+        samesite="Lax",
+        secure=False
+    )
 
     return resp, 200
 
@@ -122,7 +183,7 @@ def login():
 # =========================
 # REFRESH TOKEN
 # =========================
-@user_routes.route('/refresh', methods=['POST'])
+@user_routes.route("/refresh", methods=["POST"])
 def refresh():
     token = request.cookies.get("refresh_token")
     if not token:
@@ -141,7 +202,13 @@ def refresh():
         new_access = create_token(user.id, "access")
 
         resp = make_response(jsonify({"message": "token refreshed"}))
-        resp.set_cookie("access_token", new_access, httponly=True, samesite="Strict")
+        resp.set_cookie(
+            "access_token",
+            new_access,
+            httponly=True,
+            samesite="Lax",
+            secure=False
+        )
         return resp, 200
 
     except:
@@ -151,7 +218,7 @@ def refresh():
 # =========================
 # LOGOUT
 # =========================
-@user_routes.route('/logout', methods=['POST'])
+@user_routes.route("/logout", methods=["POST"])
 def logout():
     token = request.cookies.get("refresh_token")
     if token:
