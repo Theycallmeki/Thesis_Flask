@@ -1,5 +1,5 @@
 # app.py
-# FINAL SAFE VERSION — COOKIE AUTH WORKING
+# FINAL SAFE VERSION — COOKIE AUTH + POSTGRES SAFE
 
 from flask import Flask
 from flask_cors import CORS
@@ -14,10 +14,9 @@ app = Flask(__name__)
 # ==============================
 app.config["SECRET_KEY"] = "super-secret"
 
-# 🔴 FIXED COOKIE POLICY (REQUIRED)
 app.config["SESSION_COOKIE_HTTPONLY"] = True
-app.config["SESSION_COOKIE_SAMESITE"] = "None"   # ← MUST be None
-app.config["SESSION_COOKIE_SECURE"] = False      # ← localhost only
+app.config["SESSION_COOKIE_SAMESITE"] = "None"
+app.config["SESSION_COOKIE_SECURE"] = False
 
 # ==============================
 # CORS (ALLOW COOKIES)
@@ -43,7 +42,14 @@ app.config["SQLALCHEMY_DATABASE_URI"] = (
     "dZ4z60B6JFAL8QFNqt2dN3f8FsfkmG7p"
     "@dpg-d58kic2li9vc73a4k8v0-a.oregon-postgres.render.com/kian_nf61"
 )
+
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+
+# 🔴 CRITICAL FIX (PREVENTS DB DISCONNECT CRASH)
+app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
+    "pool_pre_ping": True,
+    "pool_recycle": 280,
+}
 
 db.init_app(app)
 
@@ -67,5 +73,6 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=5000,
         debug=True,
+        threaded=True,
         use_reloader=False
     )
