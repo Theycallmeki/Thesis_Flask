@@ -1,0 +1,81 @@
+from db import db
+from models.pending_cash_payment import PendingCashPayment
+from models.item import Item
+from models.sales_transaction import SalesTransaction
+from models.sales_transaction_item import SalesTransactionItem
+from utils.cash_code import generate_cash_code
+from datetime import datetime, timedelta
+
+class CashPaymentService:
+
+    @staticmethod
+    def create_pending_payment(user_id, cart):
+        # Validate cart
+        for entry in cart:
+            item = Item.query.filter_by(barcode=entry["barcode"]).first()
+            if not item:
+                raise Exception(f"Item not found: {entry['barcode']}")
+            if item.quantity < entry["quantity"]:
+                raise Exception(f"Insufficient stock for {item.name}")
+
+        code = generate_cash_code()
+
+        pending = PendingCashPayment(
+            user_id=user_id,
+            code=code,
+            cart=cart,
+            expires_at=datetime.utcnow() + timedelta(minutes=10)
+        )
+
+        db.session.add(pending)
+        db.session.commit()
+
+        return pending
+
+    @staticmethod
+    def update_cart(code, new_cart):
+        pending = PendingCashPayment.query.filter_by(code=code, status="PENDING").first()
+        if not pending:
+            raise Exception("Invalid or expired code")
+
+        pending.cart = new_cart
+        db.session.commit()
+        return pending
+
+    @staticmethod
+    def cancel_payment(code):
+        pending = PendingCashPayment.query.filter_by(code=code, status="PENDING").first()
+        if not pending:
+            raise Exception("Invalid or expired code")
+
+        pending.status = "CANCELLED"
+        db.session.commit()
+
+    @staticmethod
+    def confirm_payment(code):
+        pending = PendingCashPayment.query.filter_by(code=code, status="PENDING").first()
+        if not pending:
+            raise Exception("Invalid or expired code")
+
+        transaction = SalesTransaction(user_id=pending.user_id)
+        db.session.add(transaction)
+        db.session.flush()
+
+        for entry in pending.cart:
+            item = Item.query.filter_by(barcode=entry["barcode"]).first()
+            if item.quantity < entry["quantity"]:
+                raise Exception(f"Stock changed for {item.name}")
+
+            item.quantity -= entry["quantity"]
+
+            db.session.add(SalesTransactionItem(
+                transaction_id=transaction.id,
+                item_id=item.id,
+                quantity=entry["quantity"],
+                price_at_sale=item.price
+            ))
+
+        pending.status = "PAID"
+        db.session.commit()
+
+        return transaction.id

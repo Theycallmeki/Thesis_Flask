@@ -4,6 +4,7 @@ from routes.users import user_routes
 from routes.payment import payment_bp
 from routes.ml import ml_bp
 from routes.recommendation import recommendations_bp
+from routes.cash_payment import cash_payment_bp
 
 __all__ = [
     "items_bp",
@@ -12,4 +13,5 @@ __all__ = [
     "payment_bp",
     "ml_bp",
     "recommendations_bp",
+    "cash_payment_bp",
 ]

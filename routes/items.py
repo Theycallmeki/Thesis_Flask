@@ -55,7 +55,7 @@ def get_item_by_id(id):
 
 # 🟢 GET item by barcode
 @items_bp.route('/barcode/<string:barcode>', methods=['GET'])
-@require_auth()
+# @require_auth()
 def get_item_by_barcode(barcode):
     try:
         item = Item.query.filter_by(barcode=barcode).first()
