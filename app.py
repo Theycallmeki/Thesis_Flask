@@ -77,9 +77,10 @@ def index():
 # 🚀 START SERVER
 # --------------------------------------------------
 if __name__ == "__main__":
+    import threading
     with app.app_context():
         db.create_all()
-        retrain_model()
+        threading.Thread(target=retrain_model, daemon=True).start()
 
     app.run(
         host="0.0.0.0",
