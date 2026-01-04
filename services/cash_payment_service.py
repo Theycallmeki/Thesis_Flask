@@ -3,7 +3,7 @@ from models.pending_cash_payment import PendingCashPayment
 from models.item import Item
 from models.sales_transaction import SalesTransaction
 from models.sales_transaction_item import SalesTransactionItem
-from utils.cash_code import generate_cash_code
+from utils.cash_code import generate_unique_cash_code
 from datetime import datetime, timedelta
 from ml.recommender.updater import on_successful_payment
 
@@ -11,6 +11,15 @@ class CashPaymentService:
 
     @staticmethod
     def create_pending_payment(user_id, cart):
+
+    # Cancel any existing active code for this user
+        PendingCashPayment.query.filter_by(
+            user_id=user_id,
+            status="PENDING"
+        ).update({"status": "CANCELLED"})
+
+        db.session.flush()
+
         # Validate cart
         for entry in cart:
             item = Item.query.filter_by(barcode=entry["barcode"]).first()
@@ -19,17 +28,14 @@ class CashPaymentService:
             if item.quantity < entry["quantity"]:
                 raise Exception(f"Insufficient stock for {item.name}")
 
-        code = generate_cash_code()
+        expires_at = datetime.utcnow() + timedelta(minutes=10)
 
-        pending = PendingCashPayment(
+        # Create UNIQUE code safely
+        pending = generate_unique_cash_code(
             user_id=user_id,
-            code=code,
             cart=cart,
-            expires_at=datetime.utcnow() + timedelta(minutes=10)
+            expires_at=expires_at
         )
-
-        db.session.add(pending)
-        db.session.commit()
 
         return pending
 
