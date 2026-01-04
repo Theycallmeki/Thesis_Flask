@@ -1,12 +1,12 @@
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
-from models.user import User
-from models.item import Item
 
+from models.item import Item
 from .model import MFModel
 from .dataset import build_interactions
 from . import state
+
 
 class InteractionDataset(Dataset):
     def __init__(self, data):
@@ -18,25 +18,31 @@ class InteractionDataset(Dataset):
     def __getitem__(self, idx):
         return self.data[idx]
 
+
 def retrain_model(epochs=30):
     interactions = build_interactions()
 
-    users = User.query.all()
-    items = Item.query.all()
-    if not interactions or not users or not items:
+    # ONLY block if there are no purchases at all
+    if not interactions:
+        state.model = None
+        state.user_map = {}
+        state.item_map = {}
+        state.score_matrix = {}
         return
 
-    state.user_map = {u.id: i for i, u in enumerate(users)}
-    state.item_map = {i.id: j for j, i in enumerate(items)}
+    # map ONLY users who interacted
+    user_ids = list(interactions.keys())
+    item_ids = [i.id for i in Item.query.all()]
+
+    state.user_map = {uid: idx for idx, uid in enumerate(user_ids)}
+    state.item_map = {iid: idx for idx, iid in enumerate(item_ids)}
 
     data = []
     for uid, items_ in interactions.items():
+        uidx = state.user_map[uid]
         for iid, qty in items_.items():
-            data.append((
-                state.user_map[uid],
-                state.item_map[iid],
-                float(qty)
-            ))
+            if iid in state.item_map:
+                data.append((uidx, state.item_map[iid], float(qty)))
 
     loader = DataLoader(InteractionDataset(data), batch_size=32, shuffle=True)
 
@@ -44,16 +50,13 @@ def retrain_model(epochs=30):
     opt = torch.optim.Adam(model.parameters(), lr=0.01)
     loss_fn = nn.MSELoss()
 
+    model.train()
     for _ in range(epochs):
         for u, i, q in loader:
-            u = u.long()          # user indices
-            i = i.long()          # item indices
-            q = q.float()         # target quantities
             opt.zero_grad()
-            loss = loss_fn(model(u, i), q)
+            loss = loss_fn(model(u.long(), i.long()), q.float())
             loss.backward()
             opt.step()
-
 
     # build score matrix
     model.eval()
@@ -64,6 +67,8 @@ def retrain_model(epochs=30):
         for uid, uidx in state.user_map.items():
             state.score_matrix[uid] = {}
             for iid, iidx in state.item_map.items():
-                score = (model.user_emb.weight[uidx] *
-                         model.item_emb.weight[iidx]).sum().item()
+                score = (
+                    model.user_emb.weight[uidx]
+                    * model.item_emb.weight[iidx]
+                ).sum().item()
                 state.score_matrix[uid][iid] = score

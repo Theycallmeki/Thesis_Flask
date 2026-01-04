@@ -80,7 +80,7 @@ class CashPaymentService:
 
             # mark as paid
             pending.status = "PAID"
-            db.session.commit()  # ✅ commit all DB changes first
+            db.session.commit()  # commit all DB changes first
 
             # trigger recommender update, safely
             try:

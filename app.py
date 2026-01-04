@@ -7,6 +7,8 @@ from flask_cors import CORS
 from db import db
 from urls import register_routes
 
+from ml.recommender.trainer import retrain_model
+
 app = Flask(__name__)
 
 # --------------------------------------------------
@@ -27,7 +29,9 @@ CORS(
     supports_credentials=True,
     origins=[
         "http://localhost:5173",
-        "http://127.0.0.1:5173"
+        "http://127.0.0.1:5173",
+         "http://localhost:3000", # Testing Client for Customers
+        "http://127.0.0.1:3000" 
     ]
 )
 
@@ -75,6 +79,7 @@ def index():
 if __name__ == "__main__":
     with app.app_context():
         db.create_all()
+        retrain_model()
 
     app.run(
         host="0.0.0.0",
