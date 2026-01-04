@@ -5,6 +5,7 @@ from models.sales_transaction import SalesTransaction
 from models.sales_transaction_item import SalesTransactionItem
 from utils.cash_code import generate_cash_code
 from datetime import datetime, timedelta
+from ml.recommender.updater import on_successful_payment
 
 class CashPaymentService:
 
@@ -57,25 +58,39 @@ class CashPaymentService:
         if not pending:
             raise Exception("Invalid or expired code")
 
-        transaction = SalesTransaction(user_id=pending.user_id)
-        db.session.add(transaction)
-        db.session.flush()
+        try:
+            # create transaction
+            transaction = SalesTransaction(user_id=pending.user_id)
+            db.session.add(transaction)
+            db.session.flush()
 
-        for entry in pending.cart:
-            item = Item.query.filter_by(barcode=entry["barcode"]).first()
-            if item.quantity < entry["quantity"]:
-                raise Exception(f"Stock changed for {item.name}")
+            for entry in pending.cart:
+                item = Item.query.filter_by(barcode=entry["barcode"]).first()
+                if item.quantity < entry["quantity"]:
+                    raise Exception(f"Stock changed for {item.name}")
 
-            item.quantity -= entry["quantity"]
+                item.quantity -= entry["quantity"]
 
-            db.session.add(SalesTransactionItem(
-                transaction_id=transaction.id,
-                item_id=item.id,
-                quantity=entry["quantity"],
-                price_at_sale=item.price
-            ))
+                db.session.add(SalesTransactionItem(
+                    transaction_id=transaction.id,
+                    item_id=item.id,
+                    quantity=entry["quantity"],
+                    price_at_sale=item.price
+                ))
 
-        pending.status = "PAID"
-        db.session.commit()
+            # mark as paid
+            pending.status = "PAID"
+            db.session.commit()  # ✅ commit all DB changes first
 
-        return transaction.id
+            # trigger recommender update, safely
+            try:
+                on_successful_payment()
+            except Exception as e:
+                print("WARNING: recommender update failed:", e)
+
+            return transaction.id
+
+        except Exception as e:
+            db.session.rollback()  # revert any DB changes if something fails
+            raise e
+
